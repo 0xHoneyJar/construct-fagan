@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://0xhoneyjar.github.io/construct-codex-review/schemas/codex-review-finding.schema.json",
+  "title": "Codex Review Finding",
+  "description": "Structured output contract for codex-review reviewer skills. Diff-scoped code review only — no PRD/SDD/Sprint verdicts.",
+  "type": "object",
+  "required": ["verdict"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["APPROVED", "CHANGES_REQUIRED"],
+      "description": "Code review verdict. Binary by design — bugs get fixed, not discussed."
+    },
+    "summary": {
+      "type": "string",
+      "description": "One-sentence assessment of the diff."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Code review findings. Each finding is line-anchored and includes an executable fix.",
+      "items": {
+        "type": "object",
+        "required": ["severity", "file", "description", "fixed_code"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "major"],
+            "description": "Binary severity. If a finding does not warrant a fix, do not include it."
+          },
+          "file": {
+            "type": "string",
+            "description": "Path to the file containing the issue."
+          },
+          "line": {
+            "type": "integer",
+            "description": "Line number of the issue (1-indexed)."
+          },
+          "description": {
+            "type": "string",
+            "description": "What is wrong."
+          },
+          "current_code": {
+            "type": "string",
+            "description": "The exact problematic code block (fenced)."
+          },
+          "fixed_code": {
+            "type": "string",
+            "description": "The exact replacement code that fixes the issue (fenced)."
+          },
+          "explanation": {
+            "type": "string",
+            "description": "Why the fix works."
+          }
+        }
+      }
+    },
+    "fabrication_check": {
+      "type": "object",
+      "description": "Fabrication detection results. Flags hardcoded values, stubbed functions, faked results.",
+      "properties": {
+        "passed": {
+          "type": "boolean",
+          "description": "True if no fabrication concerns detected."
+        },
+        "concerns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Specific suspicious patterns observed in the diff."
+        }
+      }
+    },
+    "previous_issues_status": {
+      "type": "array",
+      "description": "Per-issue status on re-review (iteration > 1).",
+      "items": {
+        "type": "object",
+        "required": ["original_issue", "status"],
+        "properties": {
+          "original_issue": {
+            "type": "string",
+            "description": "Brief description of the previous finding."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["fixed", "rejected_with_valid_reason", "not_fixed"]
+          },
+          "notes": {
+            "type": "string",
+            "description": "If rejected, the implementer's reasoning and whether the reviewer accepts it."
+          }
+        }
+      }
+    },
+    "iteration": {
+      "type": "integer",
+      "description": "Review iteration number (1 = first review, ≥2 = re-review).",
+      "minimum": 1
+    },
+    "auto_approved": {
+      "type": "boolean",
+      "description": "True when iteration > MAX_ITERATIONS triggered API-level auto-approval (no model invocation)."
+    },
+    "note": {
+      "type": "string",
+      "description": "Additional notes appended by the API wrapper (e.g., 'iteration-cap-reached')."
+    }
+  }
+}

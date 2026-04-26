@@ -1,0 +1,26 @@
+slug: reviewing-diffs
+name: "Reviewing Diffs"
+description: |
+  Use this skill IF user has a unified diff that needs adversarial code
+  review (find bugs + provide line-anchored fixes). Composable as the
+  review stage of an implement→review loop.
+
+triggers:
+  - "review this diff"
+  - "code review the changes"
+  - "FAGAN review"
+  - "adversarial review"
+  - "review the diff"
+  - "check this PR for bugs"
+
+capabilities:
+  model_tier: opus
+  danger_level: safe
+  effort_hint: medium
+  downgrade_allowed: false
+  execution_hint: sequential
+  requires:
+    native_runtime: false
+    tool_calling: true
+    thinking_traces: false
+    vision: false

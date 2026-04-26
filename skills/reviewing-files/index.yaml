@@ -1,0 +1,24 @@
+slug: reviewing-files
+name: "Reviewing Files"
+description: |
+  Use this skill IF user wants adversarial review of specific files
+  (not a diff). Same JSON output shape as reviewing-diffs.
+
+triggers:
+  - "review this file"
+  - "audit src/auth.ts"
+  - "FAGAN audit"
+  - "review these files"
+  - "code review file"
+
+capabilities:
+  model_tier: opus
+  danger_level: safe
+  effort_hint: medium
+  downgrade_allowed: false
+  execution_hint: sequential
+  requires:
+    native_runtime: false
+    tool_calling: true
+    thinking_traces: false
+    vision: false

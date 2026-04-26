@@ -1,0 +1,65 @@
+schema_version: 3
+name: "Codex Review"
+slug: "codex-review"
+version: "0.1.0"
+description: "Lean adversarial code review for diffs and implementations. Single GPT pass via codex CLI, structured JSON findings, convergence loop. Composes with codex-rescue or any implementer for implement+review workflows."
+short_description: "Diff-scoped code review via codex CLI"
+author: "0xHoneyJar"
+license: "MIT"
+type: "skill-pack"
+visibility: public
+
+repository: https://github.com/0xHoneyJar/construct-codex-review.git
+
+skills:
+  - slug: reviewing-diffs
+    path: skills/reviewing-diffs
+  - slug: reviewing-files
+    path: skills/reviewing-files
+
+identity:
+  persona: identity/persona.yaml
+  expertise: identity/expertise.yaml
+
+domain:
+  - engineering
+  - code-review
+  - adversarial-review
+
+expertise:
+  - diff-scoped code review
+  - structured-output review findings
+  - codex CLI integration
+  - convergence loop discipline
+
+compose_with:
+  - codex-rescue
+  - artisan
+  - flatline
+
+events:
+  emits:
+    - codex-review.finding.created
+    - codex-review.verdict.changed
+    - codex-review.iteration.completed
+  consumes:
+    - implement.diff.created
+
+golden_path:
+  commands:
+    - name: review-diff
+      description: "Adversarial review of a unified diff"
+      truename_map:
+        diff_ready: /reviewing-diffs
+    - name: review-files
+      description: "Adversarial review of specific files (no diff context)"
+      truename_map:
+        files_specified: /reviewing-files
+
+requirements:
+  tools:
+    - codex            # codex CLI (gpt-5.3-codex backend)
+    - jq
+    - bash >= 4
+  env:
+    - OPENAI_API_KEY

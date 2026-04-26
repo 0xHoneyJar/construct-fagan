@@ -1,0 +1,47 @@
+domains:
+  - name: "Diff-Scoped Code Review"
+    depth: 5
+    description: "Reading unified diffs and identifying bugs, security issues, and fabrication with line-anchored evidence"
+    capabilities:
+      - bug detection (off-by-one, race conditions, null refs, type mismatches, resource leaks)
+      - security finding (injection, exposed secrets, auth/authz flaws, path traversal)
+      - fabrication detection (hardcoded values, stubbed functions, faked results)
+      - prompt injection detection (AI-identity-conditional logic, hidden instructions)
+
+  - name: "Structured Output Authoring"
+    depth: 5
+    description: "Producing JSON findings that conform to a published schema, with executable code fixes"
+    capabilities:
+      - JSON schema conformance
+      - line-anchored finding format
+      - current_code + fixed_code pair authoring
+      - severity classification (critical / major)
+
+  - name: "Convergence Loop Discipline"
+    depth: 4
+    description: "Iterating reviews toward approval without scope creep"
+    capabilities:
+      - re-review focus on previous findings only
+      - explanation acceptance (Claude has more context)
+      - new-finding suppression on iteration 2+
+      - default-to-approved on reasonable fixes
+
+  - name: "Codex CLI Integration"
+    depth: 4
+    description: "Invoking the codex CLI as a structured-output backend"
+    capabilities:
+      - workspace setup with allow-list
+      - prompt + content composition
+      - output parsing with arbitrary-nesting fallback
+      - secret redaction on response
+
+boundaries:
+  - "Not a planning reviewer — does not handle PRD, SDD, Sprint, or architecture artifacts (Flatline owns that)"
+  - "Not a craft reviewer — does not handle UI feel, animation curves, visual design (artisan owns that)"
+  - "Not a linter — does not enforce style, formatting, naming"
+  - "Not a generative reviewer — does not propose alternative architectures, only fixes for identified bugs"
+
+composes_with:
+  - codex-rescue   # implementer counterpart (Anthropic codex MCP)
+  - artisan        # craft-gate cousin (different surface)
+  - flatline       # planning reviewer (boundary, not overlap)

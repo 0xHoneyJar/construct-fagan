@@ -1,0 +1,14 @@
+# Workspace junk
+.DS_Store
+*.swp
+*.swo
+
+# Vendored libs may emit pycache via codex CLI subprocess in some configs
+__pycache__/
+*.pyc
+
+# Test output
+.coverage
+
+# Local-only experiments
+.scratch/
