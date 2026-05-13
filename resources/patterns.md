@@ -266,11 +266,11 @@ Most projects ship at layer 3-5. Layer 6 is what FAGAN/this construct addresses.
 
 **Carve-out for read-model projections** (avoid false-positives on legitimate CQRS / materialized-view patterns):
 
-The violation shape is *"secondary writer without staleness contract,"* not *"any system that returns identity fields."* Before filing a finding, verify whether the system is:
-- a **secondary writer** (no staleness contract, no refresh mechanism, schema drift expected) → genuine P18 violation
+The violation shape is *"emission without a staleness contract that covers the actual violation surface,"* not *"any system that returns identity fields."* Before filing a finding, verify whether the system is:
+- a **secondary writer / emitter without contract** (no staleness contract, no refresh mechanism, schema drift expected) → genuine P18 violation
 - a **read-optimized projection** (CQRS read model, materialized view, API gateway aggregation layer with explicit refresh triggers and a schema versioned against the identity layer) → legitimate pattern, not a violation
 
-When the staleness contract is explicit and the refresh mechanism is named in the design, the projection is sound. When the response just *happens* to include identity fields with no contract — that's P18.
+But contract presence is *necessary, not sufficient*. The contract must cover the actual violation surface — the event class that drives the canonical bug. A TTL-only refresh contract passes the "contract exists" check but still drifts on wallet-relinking (the SatanElRudo class) unless wallet-relink is named as an explicit invalidation trigger. When a contract is present but the load-bearing event class isn't covered, the projection still drifts on the failure mode P18 names. Check for: (1) named refresh triggers, (2) bounded lag window, (3) invalidation on the specific events that mutate identity (wallet relink, credential reassignment, profile merge).
 
 The pattern generalizes beyond THJ: any architecture with a profile service / canonical user table / SSO identity provider has the same temptation when a downstream system "needs" enriched identity data for its own response shape. When no explicit staleness contract is defined, the fix is to push the enrichment to the identity layer, not to duplicate it.
 
@@ -292,7 +292,7 @@ When reviewing a diff:
 |---|---|
 | security/auth diff | P1, P2, P4, P8, P12 |
 | concurrent/async refactor | P3, P6, P10, P14 |
-| isolation/sandbox boundary | P1, P2, P3, P14, P15, P18 |
+| isolation/sandbox boundary | P1, P2, P3, P14, P15 |
 | crypto/JWT/signing | P4, P12 |
 | test infrastructure changes | P5, P7 |
 | migration/atomic ops | P13 |
