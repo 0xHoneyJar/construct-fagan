@@ -276,11 +276,73 @@ The pattern generalizes beyond THJ: any architecture with a profile service / ca
 
 ---
 
+## P19 · Duplicate emission at layer seam (the test-bypass-trap)
+
+**Surface signal**: code change has TWO adjacent layers BOTH emitting/mutating the same conceptual signal (event, resource, state field, log entry). Each layer's tests cover its own emission · neither test exercises the production wiring that combines both. The composed path fires the signal twice.
+
+**Mechanism**: classic duplication-at-seam:
+
+```typescript
+// Layer A (e.g., command-queue.ts)
+function enqueue(cmd) {
+  // ... validate ...
+  bus.emit({ type: "CardCommitted", ... });  // ← Layer A emits
+  queue.push(cmd);
+}
+
+// Layer B (e.g., resolver.ts · pure function · returns events array)
+function resolve(state, cmd) {
+  return {
+    nextState: ...,
+    semanticEvents: [
+      { type: "CardCommitted", ... },  // ← Layer B emits in returned array
+      // ... other downstream events
+    ],
+  };
+}
+
+// Production composition (e.g., BattleV2.tsx) wires BOTH layers
+const r = queue.enqueue(cmd);      // ← Layer A's emit fires on bus
+const drained = queue.drain();
+const result = resolve(state, drained[0]);
+for (const event of result.semanticEvents) {
+  bus.emit(event);                 // ← Layer B's CardCommitted ALSO fires
+}
+// → CardCommitted on bus TWICE → downstream consumer (sequencer, telemetry,
+//   state machine) fires twice → 2× the work / 2× the side-effects
+```
+
+**Why tests miss it**: replay/unit tests typically call ONE layer in isolation. Layer-A test sees Layer-A's emission · Layer-B test (resolver replay) sees Layer-B's emission in the returned array. Neither test exercises the production composition that wires BOTH onto the bus.
+
+**Real instance**: compass-cycle-1 wood-vertical-slice (2026-05-13). `command-queue.ts` emits `CardCommitted` on accepted PlayCard enqueue. `resolver.ts` ALSO emits `CardCommitted` in its `semanticEvents[]` output (intentional · so resolver-only callers see the full event sequence for AC-7 golden replay). Production `BattleV2.tsx:handleZoneClick` does `queue.enqueue(...)` + iterates resolver's `semanticEvents` and bus.emits each → CardCommitted twice → wood_activation_sequence schedules 22 beats instead of 11. 108 vitest assertions all green · bug only visible in browser interaction. Caught by manual self-review (BB-equivalent · because BB-via-cheval choked on PR diff size).
+
+**Severity**: critical (correctness · downstream side-effects double · presentation timing breaks · audit trail falsified)
+
+**Related weakness shape**: double emission across a shared event boundary, comparable to TOCTOU-style race conditions in that the bug appears only when two independently valid layers are composed.
+
+**Reviewer heuristic**: when a diff adds OR modifies a layer-spanning event/state-mutation, walk:
+1. Identify EVERY layer that emits the signal (grep the type/field across the codebase)
+2. Identify the production COMPOSITION (the React component · the orchestrator · the entry point that wires layers together)
+3. Trace which emissions actually reach the bus / shared state under composition
+4. If multiple layers emit, identify which layer's emission is canonical · which layer's must be suppressed at composition time
+5. Verify a test exercises the COMPOSED path (not just isolated layer tests)
+
+**Fix shape** (one of):
+- (a) Suppress at composition time: skip the redundant emission in the composer (`for (const event of r.semanticEvents) { if (event.type === "CardCommitted") continue; bus.emit(event); }`)
+- (b) Choose canonical layer: remove emission from the non-canonical layer entirely
+- (c) Dedupe at consumer: subscriber tracks seen events within a small time window (only when (a) and (b) are infeasible · introduces fragility)
+
+**Doctrine**: when reviewing code that has multiple layers BOTH emitting/mutating the same conceptual signal, **the test surface that catches single-layer correctness does NOT catch composed-layer correctness**. The reviewer must trace the production composition, not trust isolated layer tests.
+
+**Composition note**: pairs with P15 (dispatch-guard hooks at platform layer · same family of "test-bypass-trap" where production wiring is the bug surface)
+
+---
+
 ## How FAGAN uses these patterns
 
 When reviewing a diff:
 
-1. **Walk each pattern P1-P18 against the changed lines.** Does the code exhibit the surface signal?
+1. **Walk each pattern P1-P19 against the changed lines.** Does the code exhibit the surface signal?
 2. **For each match, generate a finding** with file:line, current_code, fixed_code, explanation.
 3. **Severity is binary**: critical (security/auth/parse-differential/multi-tenant) or major (correctness/lifecycle/concurrency). Style/quality patterns excluded — that's craft-gate (artisan) territory.
 4. **Tag the named CVE family** when applicable. Anchors abstract concerns to concrete prior incidents.
@@ -291,11 +353,13 @@ When reviewing a diff:
 | review type | patterns to prioritize |
 |---|---|
 | security/auth diff | P1, P2, P4, P8, P12 |
-| concurrent/async refactor | P3, P6, P10, P14 |
+| concurrent/async refactor | P3, P6, P10, P14, P19 |
 | isolation/sandbox boundary | P1, P2, P3, P14, P15 |
 | crypto/JWT/signing | P4, P12 |
 | test infrastructure changes | P5, P7 |
 | migration/atomic ops | P13 |
+| event-driven / pub-sub / state-mutation refactor | **P19**, P3, P14 |
+| layered architecture (resolver+queue, port+live, etc.) | **P19**, P11, P15 |
 | process meta-review | P9, P11, P16, P17 |
 | identity / multi-system architecture | P18 |
 | new MCP tool / API endpoint shape | P1, P2, P18 |

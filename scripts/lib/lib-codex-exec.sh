@@ -255,8 +255,21 @@ codex_exec_single() {
 
   # Execute with timeout wrapping (Flatline IMP-004)
   # stdout suppressed — output is captured via --output-last-message file
+  # Portability: macOS lacks GNU `timeout` by default · falls back to gtimeout
+  # (coreutils) or runs unbounded if neither exists.
   local exit_code=0
-  timeout "$timeout_secs" "${cmd[@]}" < "$prompt_file" >/dev/null 2>/dev/null || exit_code=$?
+  local timeout_bin=""
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_bin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_bin="gtimeout"
+  fi
+  if [[ -n "$timeout_bin" ]]; then
+    "$timeout_bin" "$timeout_secs" "${cmd[@]}" < "$prompt_file" >/dev/null 2>/dev/null || exit_code=$?
+  else
+    echo "[codex-exec] WARN: neither timeout nor gtimeout available — running unbounded (install coreutils via brew on macOS)" >&2
+    "${cmd[@]}" < "$prompt_file" >/dev/null 2>/dev/null || exit_code=$?
+  fi
 
   rm -f "$prompt_file"
 
