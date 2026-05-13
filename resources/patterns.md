@@ -251,6 +251,8 @@ Most projects ship at layer 3-5. Layer 6 is what FAGAN/this construct addresses.
 
 **Mechanism**: Architectures with a named identity layer (`freeside-as-identity-spine`-class designs · OAuth-style canonical-user-id systems · SSO with canonical ID · multi-tenant SaaS with profile service) explicitly assign **one** system as the wallet→handle / credential→user_id resolver. Other systems read wallets / canonical IDs only. When a non-identity system starts emitting identity fields **without an explicit staleness contract or refresh mechanism**, it becomes a second writer to identity — its responses become a stale cache, its deploys gate on profile schema changes, wallet-linking events ripple through it, and authentication-state drift between the two writers becomes a recurring bug class.
 
+**Note on the "two writers" framing**: the title names the most common form — a system that originates identity values independent of the spine. The same violation surfaces when a system *reads* identity from the spine, *caches* it, and *re-emits* it in its own response shape without a staleness contract. No second write occurred, but the emission shape still couples downstream readers to a stale snapshot. The check is on the emission shape + missing contract, not on the write operation alone.
+
 **Severity**: major (architecture / data integrity / cross-app session contamination class)
 
 **Named family**: two-writers antipattern · service-mesh authorization sprawl · provider-keyed-JWT bug class (canonical instance: the SatanElRudo 2026-02-17 incident — shared cookie domain + separate profile tables + provider-internal `sub` claim → cross-app session contamination when wallet was relinked).
@@ -288,9 +290,9 @@ When reviewing a diff:
 
 | review type | patterns to prioritize |
 |---|---|
-| security/auth diff | P1, P2, P4, P8, P12, P18 |
+| security/auth diff | P1, P2, P4, P8, P12 |
 | concurrent/async refactor | P3, P6, P10, P14 |
-| isolation/sandbox boundary | P1, P2, P3, P14, P15 |
+| isolation/sandbox boundary | P1, P2, P3, P14, P15, P18 |
 | crypto/JWT/signing | P4, P12 |
 | test infrastructure changes | P5, P7 |
 | migration/atomic ops | P13 |
