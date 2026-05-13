@@ -59,6 +59,77 @@ CODEX_MIN_VERSION="${CODEX_MIN_VERSION:-0.1.0}"
 # Default timeout for codex exec (seconds)
 CODEX_DEFAULT_TIMEOUT="${CODEX_DEFAULT_TIMEOUT:-120}"
 
+# =============================================================================
+# Portable timeout shim (Linux + macOS)
+# =============================================================================
+#
+# GNU `timeout` ships with coreutils — present by default on Linux, NOT on
+# macOS unless `brew install coreutils` (which installs as `gtimeout`).
+# Perl ships with both macOS (/usr/bin/perl) and most Linux distributions, and
+# its `alarm()` syscall provides equivalent SIGALRM-after-N-seconds semantics.
+#
+# Resolution order:
+#   1. `timeout` (GNU coreutils, Linux default · also installed on macOS via
+#      `brew install coreutils` and symlinked, or by certain dev-env setups)
+#   2. `gtimeout` (coreutils on macOS via brew · g-prefix is the standard)
+#   3. perl-based shim (universal fallback · perl is system-shipped on macOS,
+#      Debian/Ubuntu/Fedora/Arch · normalize SIGALRM exit 142 → 124 to match
+#      GNU semantics so callers' `if [[ $exit_code -eq 124 ]]` checks work)
+#
+# Caller-side contract (preserved across all 3 mechanisms):
+#   - exit 124 = timed out (matches GNU `timeout` exit code)
+#   - exit 0 = success
+#   - other non-zero = command's own exit code
+#
+# Detection cached in _PORTABLE_TIMEOUT_BIN (recomputed if unset).
+_PORTABLE_TIMEOUT_BIN=""
+
+_resolve_portable_timeout() {
+  if [[ -n "$_PORTABLE_TIMEOUT_BIN" ]]; then
+    return 0
+  fi
+  if command -v timeout >/dev/null 2>&1; then
+    _PORTABLE_TIMEOUT_BIN="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    _PORTABLE_TIMEOUT_BIN="gtimeout"
+  elif command -v perl >/dev/null 2>&1; then
+    _PORTABLE_TIMEOUT_BIN="perl-shim"
+  else
+    _PORTABLE_TIMEOUT_BIN="none"
+    echo "[lib-codex-exec] FATAL: no portable timeout mechanism available." >&2
+    echo "  - GNU \`timeout\` (Linux: install coreutils; macOS: \`brew install coreutils\` then use gtimeout)" >&2
+    echo "  - perl (system-shipped on macOS + most Linux)" >&2
+    return 1
+  fi
+}
+
+# Usage: _portable_timeout <seconds> <command> [args...]
+# Exit codes match GNU `timeout`: 124 = timed out · 0 = success · other = command's exit
+_portable_timeout() {
+  local timeout_secs="$1"
+  shift
+  _resolve_portable_timeout || return 127
+  case "$_PORTABLE_TIMEOUT_BIN" in
+    timeout|gtimeout)
+      "$_PORTABLE_TIMEOUT_BIN" "$timeout_secs" "$@"
+      ;;
+    perl-shim)
+      # Perl alarm() sends SIGALRM after $timeout_secs · exec the command in-process
+      # so signals/exit reach the parent shell. SIGALRM exit is 142 (128+14) ·
+      # normalize to 124 (GNU timeout semantics) so callers don't need to know.
+      perl -e 'alarm shift; exec @ARGV; exit 127' "$timeout_secs" "$@"
+      local rc=$?
+      if [[ $rc -eq 142 ]]; then
+        return 124
+      fi
+      return $rc
+      ;;
+    *)
+      return 127
+      ;;
+  esac
+}
+
 # Capability cache directory
 _CODEX_CACHE_DIR="${TMPDIR:-/tmp}"
 
@@ -255,21 +326,10 @@ codex_exec_single() {
 
   # Execute with timeout wrapping (Flatline IMP-004)
   # stdout suppressed — output is captured via --output-last-message file
-  # Portability: macOS lacks GNU `timeout` by default · falls back to gtimeout
-  # (coreutils) or runs unbounded if neither exists.
+  # Portable across macOS + Linux: detects timeout → gtimeout → perl-shim.
+  # Always normalizes timeout exit to 124 (GNU semantics) regardless of mechanism.
   local exit_code=0
-  local timeout_bin=""
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_bin="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_bin="gtimeout"
-  fi
-  if [[ -n "$timeout_bin" ]]; then
-    "$timeout_bin" "$timeout_secs" "${cmd[@]}" < "$prompt_file" >/dev/null 2>/dev/null || exit_code=$?
-  else
-    echo "[codex-exec] WARN: neither timeout nor gtimeout available — running unbounded (install coreutils via brew on macOS)" >&2
-    "${cmd[@]}" < "$prompt_file" >/dev/null 2>/dev/null || exit_code=$?
-  fi
+  _portable_timeout "$timeout_secs" "${cmd[@]}" < "$prompt_file" >/dev/null 2>/dev/null || exit_code=$?
 
   rm -f "$prompt_file"
 
