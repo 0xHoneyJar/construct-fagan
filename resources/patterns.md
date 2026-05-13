@@ -1,8 +1,10 @@
 # FAGAN Pattern Library
 
 > 17 patterned-finding shapes distilled from the cycle-032 substrate-runtime session (PR loa-finn#157, merged 2026-05-04, b895f888) where Opus 4.7 reviewed twice (16 findings each, score plateau 23 → 23, no convergence) and GPT-5.5 via codex CLI reviewed once and surfaced 3 contract-violating issues neither Opus pass had found.
+>
+> P18 added 2026-05-13 from a separate lineage — THJ identity-spine doctrine + `0xHoneyJar/score-mibera#109` boundary violation. Architectural pattern, not from cycle-032; generalizable to any architecture with a named identity layer.
 
-This file is FAGAN's pattern checklist. Reference it during review. Each pattern: surface signal · mechanism · named CVE family · one cycle-032 example. Severity defaults are FAGAN-binary (critical or major). Style/quality patterns are excluded — FAGAN doesn't review those.
+This file is FAGAN's pattern checklist. Reference it during review. Each pattern: surface signal · mechanism · named CVE family · one example. Severity defaults are FAGAN-binary (critical or major). Style/quality patterns are excluded — FAGAN doesn't review those.
 
 ---
 
@@ -241,11 +243,44 @@ Most projects ship at layer 3-5. Layer 6 is what FAGAN/this construct addresses.
 
 ---
 
+## P18 · Cross-system identity emission (two-writers class)
+
+**Surface signal**: a new tool / endpoint / response shape on a non-identity system (analytics, scoring, content, leaderboard, indexer) emits identity fields alongside the wallet / canonical-key it actually operates on.
+- Generic identity fields: `handle`, `display_name`, `user_id`, `pfp_url`.
+- Domain-specific variants a reviewer in that domain will recognize: `discord_id`, `discord_username`, `mibera_id`, `ENS_name`, etc. (THJ-specific examples; substitute the equivalent for the host architecture).
+
+**Mechanism**: Architectures with a named identity layer (`freeside-as-identity-spine`-class designs · OAuth-style canonical-user-id systems · SSO with canonical ID · multi-tenant SaaS with profile service) explicitly assign **one** system as the wallet→handle / credential→user_id resolver. Other systems read wallets / canonical IDs only. When a non-identity system starts emitting identity fields **without an explicit staleness contract or refresh mechanism**, it becomes a second writer to identity — its responses become a stale cache, its deploys gate on profile schema changes, wallet-linking events ripple through it, and authentication-state drift between the two writers becomes a recurring bug class.
+
+**Note on the "two writers" framing**: the title names the most common form — a system that originates identity values independent of the spine. The same violation surfaces when a system *reads* identity from the spine, *caches* it, and *re-emits* it in its own response shape without a staleness contract. No second write occurred, but the emission shape still couples downstream readers to a stale snapshot. The check is on the emission shape + missing contract, not on the write operation alone.
+
+**Severity**: major (architecture / data integrity / cross-app session contamination class)
+
+**Named family**: two-writers antipattern · service-mesh authorization sprawl · provider-keyed-JWT bug class (canonical mechanism: shared cookie domain + separate per-brand profile tables + provider-internal `sub` claim → cross-app session contamination when a wallet is relinked; observed in production 2026-02-17 on THJ stack).
+
+**Example**: `0xHoneyJar/score-mibera#109` (2026-05-13) proposed a `resolve_identities` tool on score-mibera returning batch `wallet → display_name / discord_id / mibera_id`. THJ's operator-confirmed boundary doctrine (2026-04-29) explicitly rejected this shape: *"score-mcp ships factor metadata (UNIX self-description). identity (wallet → handle) lives in freeside. they cross paths but never conflate."* Drift class: wallet-linking event on the identity layer → stale identity cached in score response → downstream consumer (Discord bot, dashboard) shows wrong handle on next read.
+
+**Doctrine**: The identity-emitting system is NAMED explicitly in the architecture. Non-identity systems read wallets / canonical IDs only. Reviewer-side check: when a diff adds a new tool / endpoint / schema field on a non-identity system, search the response shape for identity-typed fields. If found:
+- cite the architecture's identity-spine doctrine
+- ask whether the use case can route through the identity layer instead
+- if batch / performance is the justification, the answer is "build batch on the identity layer," not "duplicate the identity layer"
+
+**Carve-out for read-model projections** (avoid false-positives on legitimate CQRS / materialized-view patterns):
+
+The violation shape is *"emission without a staleness contract that covers the actual violation surface,"* not *"any system that returns identity fields."* Before filing a finding, verify whether the system is:
+- a **secondary writer / emitter without contract** (no staleness contract, no refresh mechanism, schema drift expected) → genuine P18 violation
+- a **read-optimized projection** (CQRS read model, materialized view, API gateway aggregation layer with explicit refresh triggers and a schema versioned against the identity layer) → legitimate pattern, not a violation
+
+But contract presence is *necessary, not sufficient*. The contract must cover the actual violation surface — the event class that drives the canonical bug. A TTL-only refresh contract passes the "contract exists" check but still drifts on wallet-relinking (the SatanElRudo class) unless wallet-relink is named as an explicit invalidation trigger. When a contract is present but the load-bearing event class isn't covered, the projection still drifts on the failure mode P18 names. Check for: (1) named refresh triggers, (2) bounded lag window, (3) invalidation on the specific events that mutate identity (wallet relink, credential reassignment, profile merge).
+
+The pattern generalizes beyond THJ: any architecture with a profile service / canonical user table / SSO identity provider has the same temptation when a downstream system "needs" enriched identity data for its own response shape. When no explicit staleness contract is defined, the fix is to push the enrichment to the identity layer, not to duplicate it.
+
+---
+
 ## How FAGAN uses these patterns
 
 When reviewing a diff:
 
-1. **Walk each pattern P1-P17 against the changed lines.** Does the code exhibit the surface signal?
+1. **Walk each pattern P1-P18 against the changed lines.** Does the code exhibit the surface signal?
 2. **For each match, generate a finding** with file:line, current_code, fixed_code, explanation.
 3. **Severity is binary**: critical (security/auth/parse-differential/multi-tenant) or major (correctness/lifecycle/concurrency). Style/quality patterns excluded — that's craft-gate (artisan) territory.
 4. **Tag the named CVE family** when applicable. Anchors abstract concerns to concrete prior incidents.
@@ -262,3 +297,5 @@ When reviewing a diff:
 | test infrastructure changes | P5, P7 |
 | migration/atomic ops | P13 |
 | process meta-review | P9, P11, P16, P17 |
+| identity / multi-system architecture | P18 |
+| new MCP tool / API endpoint shape | P1, P2, P18 |
