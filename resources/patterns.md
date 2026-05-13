@@ -245,22 +245,32 @@ Most projects ship at layer 3-5. Layer 6 is what FAGAN/this construct addresses.
 
 ## P18 · Two writers to identity (cross-system identity emission)
 
-**Surface signal**: a new tool / endpoint / response shape on a non-identity system (analytics, scoring, content, leaderboard, indexer) that emits identity fields — `handle`, `display_name`, `discord_id`, `discord_username`, `pfp_url`, `user_id`, `mibera_id`, `ENS_name`, etc. — alongside the wallet / canonical-key it actually operates on.
+**Surface signal**: a new tool / endpoint / response shape on a non-identity system (analytics, scoring, content, leaderboard, indexer) emits identity fields alongside the wallet / canonical-key it actually operates on.
+- Generic identity fields: `handle`, `display_name`, `user_id`, `pfp_url`.
+- Domain-specific variants a reviewer in that domain will recognize: `discord_id`, `discord_username`, `mibera_id`, `ENS_name`, etc. (THJ-specific examples; substitute the equivalent for the host architecture).
 
-**Mechanism**: Architectures with a named identity layer (`freeside-as-identity-spine`-class designs · OAuth-style canonical-user-id systems · SSO with canonical ID · multi-tenant SaaS with profile service) explicitly assign **one** system as the wallet→handle / credential→user_id resolver. Other systems read wallets / canonical IDs only. When a non-identity system starts emitting identity fields, it becomes a second writer to identity — its responses become a stale cache, its deploys gate on profile schema changes, wallet-linking events ripple through it, and authentication-state drift between the two writers becomes a recurring bug class.
+**Mechanism**: Architectures with a named identity layer (`freeside-as-identity-spine`-class designs · OAuth-style canonical-user-id systems · SSO with canonical ID · multi-tenant SaaS with profile service) explicitly assign **one** system as the wallet→handle / credential→user_id resolver. Other systems read wallets / canonical IDs only. When a non-identity system starts emitting identity fields **without an explicit staleness contract or refresh mechanism**, it becomes a second writer to identity — its responses become a stale cache, its deploys gate on profile schema changes, wallet-linking events ripple through it, and authentication-state drift between the two writers becomes a recurring bug class.
 
 **Severity**: major (architecture / data integrity / cross-app session contamination class)
 
-**Named family**: two-writers antipattern · CWE-1059 incomplete documentation of design · service-mesh authorization sprawl · provider-keyed-JWT bug class (canonical instance: the SatanElRudo 2026-02-17 incident — shared cookie domain + separate profile tables + provider-internal `sub` claim → cross-app session contamination when wallet was relinked).
+**Named family**: two-writers antipattern · service-mesh authorization sprawl · provider-keyed-JWT bug class (canonical instance: the SatanElRudo 2026-02-17 incident — shared cookie domain + separate profile tables + provider-internal `sub` claim → cross-app session contamination when wallet was relinked).
 
-**Example**: `0xHoneyJar/score-mibera#109` (2026-05-13) proposed a `resolve_identities` tool on score-mibera returning batch `wallet → display_name / discord_id / mibera_id`. THJ's operator-confirmed boundary doctrine (2026-04-29, `vault/wiki/concepts/score-vs-identity-boundary.md`) explicitly rejected this shape: *"score-mcp ships factor metadata (UNIX self-description). identity (wallet → handle) lives in freeside. they cross paths but never conflate."* Drift class: wallet-linking event on the identity layer → stale identity cached in score response → downstream consumer (Discord bot, dashboard) shows wrong handle on next read.
+**Example**: `0xHoneyJar/score-mibera#109` (2026-05-13) proposed a `resolve_identities` tool on score-mibera returning batch `wallet → display_name / discord_id / mibera_id`. THJ's operator-confirmed boundary doctrine (2026-04-29) explicitly rejected this shape: *"score-mcp ships factor metadata (UNIX self-description). identity (wallet → handle) lives in freeside. they cross paths but never conflate."* Drift class: wallet-linking event on the identity layer → stale identity cached in score response → downstream consumer (Discord bot, dashboard) shows wrong handle on next read.
 
 **Doctrine**: The identity-emitting system is NAMED explicitly in the architecture. Non-identity systems read wallets / canonical IDs only. Reviewer-side check: when a diff adds a new tool / endpoint / schema field on a non-identity system, search the response shape for identity-typed fields. If found:
 - cite the architecture's identity-spine doctrine
 - ask whether the use case can route through the identity layer instead
 - if batch / performance is the justification, the answer is "build batch on the identity layer," not "duplicate the identity layer"
 
-The pattern generalizes beyond THJ: any architecture with a profile service / canonical user table / SSO identity provider has the same temptation when a downstream system "needs" enriched identity data for its own response shape. The fix is always to push the enrichment to the identity layer, not to duplicate it.
+**Carve-out for read-model projections** (avoid false-positives on legitimate CQRS / materialized-view patterns):
+
+The violation shape is *"secondary writer without staleness contract,"* not *"any system that returns identity fields."* Before filing a finding, verify whether the system is:
+- a **secondary writer** (no staleness contract, no refresh mechanism, schema drift expected) → genuine P18 violation
+- a **read-optimized projection** (CQRS read model, materialized view, API gateway aggregation layer with explicit refresh triggers and a schema versioned against the identity layer) → legitimate pattern, not a violation
+
+When the staleness contract is explicit and the refresh mechanism is named in the design, the projection is sound. When the response just *happens* to include identity fields with no contract — that's P18.
+
+The pattern generalizes beyond THJ: any architecture with a profile service / canonical user table / SSO identity provider has the same temptation when a downstream system "needs" enriched identity data for its own response shape. When no explicit staleness contract is defined, the fix is to push the enrichment to the identity layer, not to duplicate it.
 
 ---
 
