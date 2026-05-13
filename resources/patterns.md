@@ -243,7 +243,7 @@ Most projects ship at layer 3-5. Layer 6 is what FAGAN/this construct addresses.
 
 ---
 
-## P18 · Two writers to identity (cross-system identity emission)
+## P18 · Cross-system identity emission (two-writers class)
 
 **Surface signal**: a new tool / endpoint / response shape on a non-identity system (analytics, scoring, content, leaderboard, indexer) emits identity fields alongside the wallet / canonical-key it actually operates on.
 - Generic identity fields: `handle`, `display_name`, `user_id`, `pfp_url`.
@@ -255,7 +255,7 @@ Most projects ship at layer 3-5. Layer 6 is what FAGAN/this construct addresses.
 
 **Severity**: major (architecture / data integrity / cross-app session contamination class)
 
-**Named family**: two-writers antipattern · service-mesh authorization sprawl · provider-keyed-JWT bug class (canonical instance: the SatanElRudo 2026-02-17 incident — shared cookie domain + separate profile tables + provider-internal `sub` claim → cross-app session contamination when wallet was relinked).
+**Named family**: two-writers antipattern · service-mesh authorization sprawl · provider-keyed-JWT bug class (canonical mechanism: shared cookie domain + separate per-brand profile tables + provider-internal `sub` claim → cross-app session contamination when a wallet is relinked; observed in production 2026-02-17 on THJ stack).
 
 **Example**: `0xHoneyJar/score-mibera#109` (2026-05-13) proposed a `resolve_identities` tool on score-mibera returning batch `wallet → display_name / discord_id / mibera_id`. THJ's operator-confirmed boundary doctrine (2026-04-29) explicitly rejected this shape: *"score-mcp ships factor metadata (UNIX self-description). identity (wallet → handle) lives in freeside. they cross paths but never conflate."* Drift class: wallet-linking event on the identity layer → stale identity cached in score response → downstream consumer (Discord bot, dashboard) shows wrong handle on next read.
 
