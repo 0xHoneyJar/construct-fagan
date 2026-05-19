@@ -282,9 +282,9 @@ codex_exec_single() {
   local workspace="${4:-}"
   local timeout_secs="${5:-$CODEX_DEFAULT_TIMEOUT}"
 
-  # Auth check
+  # Auth check — needs either OPENAI_API_KEY OR ~/.codex/auth.json
   if ! ensure_codex_auth; then
-    echo "[codex-exec] ERROR: OPENAI_API_KEY not set" >&2
+    echo "[codex-exec] ERROR: no codex auth available · set OPENAI_API_KEY or run \`codex login\` to populate ~/.codex/auth.json" >&2
     return 4
   fi
 

@@ -78,11 +78,23 @@ readonly _MAX_PATTERN_LENGTH=200
 # Auth Management
 # =============================================================================
 
-# Check if OPENAI_API_KEY is available in the environment.
-# Env-only auth: never reads .env files, never calls codex login.
+# Check that codex CLI has SOMETHING to authenticate with.
+# Accepts either:
+#   1. OPENAI_API_KEY env var (legacy API-key path)
+#   2. ~/.codex/auth.json (ChatGPT subscription token, populated by `codex login`)
+#
+# The codex CLI itself decides which to use at invoke time — subscription auth
+# is preferred when both are present. Refusing to run when only subscription
+# auth exists locked out operators who never set OPENAI_API_KEY (per the
+# subscription-cli-always policy used in the loa ecosystem). Adding the
+# auth.json branch is the minimal fix.
+#
 # Returns: 0 if auth available, 1 otherwise
 ensure_codex_auth() {
   if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+    return 0
+  fi
+  if [[ -f "${HOME}/.codex/auth.json" ]]; then
     return 0
   fi
   return 1
