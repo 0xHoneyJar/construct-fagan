@@ -24,8 +24,8 @@
         "properties": {
           "severity": {
             "type": "string",
-            "enum": ["critical", "major"],
-            "description": "Binary severity. If a finding does not warrant a fix, do not include it."
+            "enum": ["critical", "major", "cleanup"],
+            "description": "critical/major = bugs/security that BLOCK (verdict CHANGES_REQUIRED). cleanup = non-blocking maintainability/drift (duplication, dead code, repeated patterns, best-practice nits worth fixing) — surfaced to leave the code better, but verdict stays APPROVED when only cleanup findings exist."
           },
           "file": {
             "type": "string",
