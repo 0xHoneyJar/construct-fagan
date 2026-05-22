@@ -35,10 +35,10 @@ load test_helper
   [ "$req" = "description,file,fixed_code,severity" ]
 }
 
-@test "severity enum is critical | major" {
+@test "severity enum is critical | major | cleanup" {
   local sev
   sev=$(jq -r '.properties.findings.items.properties.severity.enum | sort | join(",")' "$CONSTRUCT_ROOT/schemas/codex-review-finding.schema.json")
-  [ "$sev" = "critical,major" ]
+  [ "$sev" = "cleanup,critical,major" ]
 }
 
 @test "previous_issues_status status enum has the 3 expected values" {
