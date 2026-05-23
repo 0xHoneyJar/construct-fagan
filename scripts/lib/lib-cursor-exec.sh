@@ -63,15 +63,16 @@ cursor_exec_single() {
     cleanup_ws="true"
   fi
 
-  # Hardened (self-review iter-2): --mode plan = read-only (analyze, no edits) +
-  # --sandbox enabled = OS confinement — defense-in-depth parity with the claude
-  # --tools "" lockdown, since the diff is UNTRUSTED. Verified empirically: without
-  # -f, cursor denies tool execution by default ("rejected by sandbox policy").
-  # --trust is BOOLEAN (skip the Workspace-Trust prompt for the empty cwd); NEVER
-  # -f/--yolo. "$prompt" is the trailing POSITIONAL the agent reads as the prompt
-  # (a self-review voice's "--trust ate the prompt" claim was a FALSE ALARM — the
-  # live run produced a real Composer review). Empty isolated cwd = empty blast radius.
-  local cmd=("$bin" -p --mode plan --sandbox enabled --output-format json --model "$model" --trust "$prompt")
+  # --mode ask = single-shot Q&A (analyze + answer, no edits). PERF-CRITICAL
+  # (2026-05-23): --mode plan runs an AGENTIC read-only PLANNING loop that explores
+  # for minutes and blew past the panel timeout → the composer voice silently DROPPED
+  # on every real review (a 10KB review prompt took >180s under plan; the same prompt
+  # under ask returns in ~65s). ask is the right shape for "read this diff, emit JSON".
+  # Safety is unchanged: --sandbox enabled = OS confinement + the empty mktemp cwd +
+  # the diff lives IN the prompt (no repo access needed) = empty blast radius. --trust
+  # is BOOLEAN (skip the Workspace-Trust prompt for the empty cwd); NEVER -f/--yolo.
+  # "$prompt" is the trailing POSITIONAL the agent reads as the prompt.
+  local cmd=("$bin" -p --mode ask --sandbox enabled --output-format json --model "$model" --trust "$prompt")
 
   local exit_code=0
   ( cd "$workspace" && _portable_timeout "$timeout_secs" "${cmd[@]}" ) </dev/null \
