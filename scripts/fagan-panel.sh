@@ -56,7 +56,7 @@ err() { echo "[fagan-panel] $*" >&2; }
 # ---- args -------------------------------------------------------------------
 COMMAND="${1:-}"; [[ -z "$COMMAND" ]] && { err "usage: fagan-panel.sh review-diff <diff>"; exit 2; }
 shift
-diff_path=""; output_file=""; voices_spec="$DEFAULT_VOICES"
+diff_path=""; output_file=""; voices_spec="${FAGAN_PANEL_VOICES:-$DEFAULT_VOICES}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output)     [[ $# -ge 2 && -n "${2:-}" ]] || { err "--output requires a path"; exit 2; }; output_file="$2"; shift 2 ;;

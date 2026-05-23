@@ -14,20 +14,42 @@ Single-pass GPT code review of a unified diff. Returns structured JSON conformin
 | Input | Required | Description |
 |---|---|---|
 | `diff_path` | yes | Path to a unified diff file (or `-` for stdin) |
-| `iteration` | no (default 1) | Convergence loop iteration; ≥2 triggers re-review prompt |
+| `mode` | no (default `fast`) | `fast` = single-model (gpt-5.5 via codex). `thorough` = multimodel PANEL (Opus + GPT + Composer). |
+| `iteration` | no (default 1) | Convergence loop iteration; ≥2 triggers re-review prompt (fast mode) |
 | `previous_findings` | when iteration ≥ 2 | Path to prior verdict JSON (the previous review's response) |
 
 ## Invocation
 
 ```bash
-# First review
+# FAST (default) — single-model, per-diff, cheap
 bash scripts/codex-review-api.sh review-diff path/to/changes.diff
 
 # Re-review (iteration 2+) — must supply previous findings
 bash scripts/codex-review-api.sh review-diff path/to/changes.diff \
   --iteration 2 \
   --previous .run/codex-review/iter-1.json
+
+# THOROUGH — multimodel PANEL (3 voices, distinct corpora). For TEND passes /
+# pre-merge gates. Emits the same finding schema + a `panel` block (per-voice
+# verdicts, who-caught-what, models_ran, dropped voices, lone_blocking_flags).
+bash scripts/fagan-panel.sh review-diff path/to/changes.diff
 ```
+
+## Modes
+
+`mode: thorough` routes to `fagan-panel.sh` instead of the single-model path. The
+panel fans the diff out to voices from DISTINCT base corpora so reviews fail
+differently — a lone critical from any voice HOLDS the gate (never out-voted), and
+disagreement is surfaced (`panel.lone_blocking_flags`), not averaged away.
+
+- **Voice roster** is operator-tunable via the `fagan_protocol.voices` block in
+  `.loa.config.yaml` (exported as `FAGAN_PANEL_VOICES="id:role:adapter:model,…"`),
+  or the built-in default `opus(skeptic)/claude + gpt-5.5(reviewer)/codex +
+  composer-2.5(reviewer)/cursor`.
+- **Requirements:** claude CLI (OAuth subscription), codex CLI (`~/.codex/auth.json`),
+  cursor-agent (Cursor **Pro** — free tier returns `resource_exhausted`). Any voice
+  whose CLI/auth is unavailable is DROPPED (honest headcount), never substituted.
+- **Default stays `fast`** — thorough is opt-in (slower; one metered Composer call).
 
 ## Output
 
