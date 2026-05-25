@@ -2,8 +2,8 @@ schema_version: 3
 name: "FAGAN"
 slug: "fagan"
 version: "0.2.0"
-description: "FAGAN — strict adversarial code review for diffs and implementations. Named after Michael Fagan (IBM 1976, formal code inspection). Single GPT pass via codex CLI, structured JSON findings, convergence loop. Composes with codex-rescue or any implementer."
-short_description: "FAGAN · diff-scoped code review via codex CLI"
+description: "FAGAN — strict adversarial code review for diffs and implementations. Named after Michael Fagan (IBM 1976, formal code inspection). Multimodel by default: 3-voice panel (Opus skeptic + GPT reviewer + Composer reviewer) from distinct base corpora, severity-cluster consensus, lone-critical-holds-gate. Single-GPT fast path via `--mode fast`. Composes with codex-rescue or any implementer."
+short_description: "FAGAN · multimodel diff-scoped code review (Opus + GPT + Composer)"
 author: "0xHoneyJar"
 license: "MIT"
 type: "skill-pack"
@@ -31,7 +31,8 @@ domain:
 expertise:
   - diff-scoped code review
   - structured-output review findings
-  - codex CLI integration
+  - multimodel panel orchestration (claude + codex + cursor)
+  - severity-cluster consensus + lone-critical-holds-gate
   - convergence loop discipline
 
 compose_with:
@@ -60,8 +61,10 @@ golden_path:
 
 requirements:
   tools:
-    - codex            # codex CLI (gpt-5.5 backend by default; override via CODEX_REVIEW_MODEL)
+    - claude           # claude CLI — opus-skeptic voice (multimodel default)
+    - codex            # codex CLI — gpt-reviewer voice (default; also fast-mode backend)
+    - cursor-agent     # cursor-agent — composer-reviewer voice (Pro subscription required; drops on free tier)
     - jq
     - bash >= 4
   env:
-    - OPENAI_API_KEY
+    - OPENAI_API_KEY   # codex auth (or ~/.codex/auth.json from ChatGPT subscription)
