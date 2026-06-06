@@ -41,6 +41,17 @@ DIFF_PATH=""; OUT=""; TIMEOUT="${CHEVAL_COUNCIL_TIMEOUT:-280}"; MAX_TOKENS="${CH
 # gpt-reviewer (codex/openai) + a claude reviewer + a gemini voice = distinct corpora.
 VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-gpt-reviewer,reviewing-code,deep-thinker}"
 CHEVAL=""
+# Force each voice straight onto its within-company HEADLESS terminal (kind:cli,
+# subscription-auth) instead of its HTTP primary. WHY (grounded 2026-06-06): the
+# reviewer-tier agents resolve to HTTP models (openai:gpt-5.5 / gemini-2.5-pro)
+# whose chain SHORT-CIRCUITS on a non-retryable ChevalError — e.g. OpenAI
+# `insufficient_quota` returns at the first entry and NEVER walks to the
+# codex-headless terminal. The council then sees exit:2/empty for every voice and
+# fails closed (exit 3) even though the subscription CLIs are healthy. Binding the
+# voice to its headless model via --model bypasses the dead HTTP primary. Set
+# CHEVAL_COUNCIL_FORCE_HEADLESS=0 to keep the HTTP-first chain (use when API quota
+# is live and you want the full chain-walk + verdict-quality envelope).
+FORCE_HEADLESS="${CHEVAL_COUNCIL_FORCE_HEADLESS:-1}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -83,19 +94,44 @@ Respond with ONLY a single JSON object, no prose around it:
 Return CHANGES_REQUIRED if any critical/major finding exists.
 EOF
 
+# Map a voice name to its within-company HEADLESS terminal (provider:model).
+# Family is inferred from the voice name; defaults to codex-headless (the most
+# broadly-available subscription CLI). Mirrors the model-config.yaml chain
+# terminals: openai→codex-headless, google→gemini-headless, anthropic→claude-headless.
+headless_model_for_voice() {
+  local v="$1"
+  case "$v" in
+    *gemini*|*deep-thinker*|*deep_thinker*|*gem-*)        echo "google:gemini-headless" ;;
+    *claude*|*anthropic*|*native*|*opus*|*sonnet*)        echo "anthropic:claude-headless" ;;
+    *gpt*|*codex*|*openai*|*reviewing-code*|*reviewer*)   echo "openai:codex-headless" ;;
+    *)                                                     echo "openai:codex-headless" ;;
+  esac
+}
+
 panel_voices_json="[]"; dropped_json="[]"; models_ran_json="[]"
 any_changes=0; survived=0
 
 IFS=',' read -ra VARR <<<"$VOICES"
 for voice in "${VARR[@]}"; do
   voice="$(echo "$voice" | xargs)"; [[ -n "$voice" ]] || continue
-  err "dispatching voice '$voice' through cheval…"
+  # Pin the voice to its headless terminal so a dead HTTP primary (no quota /
+  # non-retryable ChevalError) can't short-circuit the chain before the
+  # subscription CLI is reached. --system is preserved: the headless adapters
+  # flatten the system message into the prompt (verified — they do NOT drop it).
+  model_flag=()
+  if [[ "$FORCE_HEADLESS" == "1" ]]; then
+    hmodel="$(headless_model_for_voice "$voice")"
+    model_flag=(--model "$hmodel")
+    err "dispatching voice '$voice' through cheval → $hmodel (headless)…"
+  else
+    err "dispatching voice '$voice' through cheval (HTTP-first chain)…"
+  fi
   raw="$WORK/$voice.json"; vqs="$WORK/$voice.vq.json"; ec=0
   # Snapshot the audit-log length so we attribute ONLY this voice's MODELINV entries
   # (fix: avoids the cross-voice race of a bare `tail -1` on the shared log).
   before=0; [[ -f .run/model-invoke.jsonl ]] && before=$(wc -l < .run/model-invoke.jsonl 2>/dev/null || echo 0)
   LOA_VERDICT_QUALITY_SIDECAR="$vqs" \
-    python3 "$CHEVAL" --agent "$voice" --input "$DIFF_FILE" --system "$PERSONA" \
+    python3 "$CHEVAL" --agent "$voice" "${model_flag[@]}" --input "$DIFF_FILE" --system "$PERSONA" \
       --output-format json --json-errors --max-tokens "$MAX_TOKENS" --timeout "$TIMEOUT" \
       >"$raw" 2>"$WORK/$voice.stderr" || ec=$?
 
