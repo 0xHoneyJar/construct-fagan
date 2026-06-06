@@ -1,13 +1,21 @@
 ---
 name: reviewing-diffs
-description: Adversarial code review of a unified diff via codex CLI. Returns structured JSON findings with line-anchored fixes. Convergence loop with 3-iteration cap.
+description: Adversarial code review of a unified diff via a CROSS-MODEL council (4 distinct model families) by default, single-pass codex CLI as fallback. Returns structured JSON findings with line-anchored fixes.
 allowed-tools: [Bash, Read]
 user-invocable: true
 ---
 
 # /reviewing-diffs — Diff Code Review
 
-Single-pass GPT code review of a unified diff. Returns structured JSON conforming to `schemas/codex-review-finding.schema.json`.
+Adversarial code review of a unified diff. **Default: cross-model council** — four
+DISTINCT model families (claude / gpt-codex / cursor-composer / gemini) review the
+same diff so no single corpus's blind spot decides the verdict. **Fallback:**
+single-pass GPT review via the codex CLI.
+
+The dispatcher is `scripts/fagan-review.sh`; mode is selected by `FAGAN_REVIEW_MODE`
+(`council` default, `single` fallback). Council output carries a per-voice MODELINV
+audit (`.run/model-invoke.jsonl`) + a `panel:{voices,dropped,models_ran}` block;
+single-pass output conforms to `schemas/codex-review-finding.schema.json`.
 
 ## Inputs
 
@@ -20,14 +28,49 @@ Single-pass GPT code review of a unified diff. Returns structured JSON conformin
 ## Invocation
 
 ```bash
-# First review
-bash scripts/codex-review-api.sh review-diff path/to/changes.diff
+# DEFAULT — cross-model 4-voice council (claude + gpt-codex + cursor + gemini)
+bash scripts/fagan-review.sh path/to/changes.diff
 
-# Re-review (iteration 2+) — must supply previous findings
-bash scripts/codex-review-api.sh review-diff path/to/changes.diff \
+# Council with an explicit cheval + voice set (e.g. for testing / pinned routing)
+bash scripts/fagan-review.sh path/to/changes.diff \
+  --voices jam-reviewer-claude,jam-reviewer-gpt,jam-reviewer-cursor,deep-thinker \
+  --cheval /abs/path/to/.claude/adapters/cheval.py
+
+# FALLBACK — single-pass GPT review (one model, no audit envelope)
+FAGAN_REVIEW_MODE=single bash scripts/fagan-review.sh path/to/changes.diff
+
+# Re-review (iteration 2+, single-pass only) — must supply previous findings
+FAGAN_REVIEW_MODE=single bash scripts/fagan-review.sh path/to/changes.diff \
   --iteration 2 \
   --previous .run/codex-review/iter-1.json
+
+# The single-pass backend is also callable directly (the dispatcher just wraps it):
+#   bash scripts/codex-review-api.sh review-diff path/to/changes.diff
 ```
+
+### Review modes
+
+| `FAGAN_REVIEW_MODE` | Backend | Models | Audit envelope | When |
+|---|---|---|---|---|
+| `council` (default) | `scripts/cheval-council.sh` | 4 distinct families | per-voice MODELINV | genuine cross-model SWE review |
+| `single` | `scripts/codex-review-api.sh` | one GPT pass | none | fast single-opinion check; council unavailable |
+
+**Default voices** (`FAGAN_PANEL_VOICES_CHEVAL` to override) bind to subscription
+HEADLESS terminals — no API quota dependency:
+
+| Voice | Headless terminal (model family) |
+|---|---|
+| `jam-reviewer-claude` | `anthropic:claude-headless` |
+| `jam-reviewer-gpt` | `openai:codex-headless` |
+| `jam-reviewer-cursor` | `cursor:cursor-headless` (Composer 2.5) |
+| `deep-thinker` | `google:gemini-headless` |
+
+**Fallback behavior:** in `council` mode, if the council cannot RUN (cheval.py
+absent / bad input → exit 2) the dispatcher falls back to single-pass. It does
+NOT fall back on a council exit 3 (**all-voices-dropped — the load-bearing
+fail-closed verdict**), which propagates so a degraded council can never be
+silently downgraded to a single-model APPROVED. Set
+`FAGAN_REVIEW_COUNCIL_FALLBACK=0` to make a council infra-failure hard-fail.
 
 ## Output
 

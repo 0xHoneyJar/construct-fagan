@@ -2,7 +2,7 @@
 
 > @FAGAN reviews a code diff. Strict, evidence-anchored, fix-first.
 
-Calls the `reviewing-diffs` skill from the FAGAN construct (formerly construct-codex-review). Single GPT-5.5 pass via codex CLI · structured JSON findings · 3-iteration convergence cap.
+Calls the `reviewing-diffs` skill from the FAGAN construct (formerly construct-codex-review). **Default: a cross-model COUNCIL** — four DISTINCT model families (claude · gpt-codex · cursor-composer · gemini) review the same diff via cheval, each emitting a per-voice MODELINV audit envelope, drop-discipline, and fail-closed. **Fallback** (`FAGAN_REVIEW_MODE=single`): a single GPT pass via the codex CLI with a 3-iteration convergence cap.
 
 ## Usage
 
@@ -29,11 +29,14 @@ See [`WHEN-TO-USE.md`](../WHEN-TO-USE.md) — short version:
 
 ## Output
 
-JSON conforming to `schemas/codex-review-finding.schema.json`:
+**Council mode (default):** a verdict + `panel:{routed_via:"cheval", voices:[…], dropped:[…], models_ran:[…]}` block. Each surviving voice carries `model_ran` (the actual `final_model_id` from `.run/model-invoke.jsonl`), `verdict`, and `findings[]`. A dropped voice is recorded in `dropped[]` with its reason — never substituted.
+
+**Single mode (fallback):** JSON conforming to `schemas/codex-review-finding.schema.json`:
 - `verdict`: APPROVED | CHANGES_REQUIRED
 - `summary`: one-sentence assessment
 - `findings[]`: `severity` (critical | major), `file`, `line`, `current_code`, `fixed_code`, `explanation`
-- exit code: 0 = APPROVED · 1 = CHANGES_REQUIRED
+
+Exit code (both modes): 0 = APPROVED · 1 = CHANGES_REQUIRED · 2 = input/infra · 3 = all voices dropped (council fail-closed).
 
 ## See also
 
