@@ -38,8 +38,14 @@ err() { printf '[cheval-council] %s\n' "$*" >&2; }
 
 DIFF_PATH=""; OUT=""; TIMEOUT="${CHEVAL_COUNCIL_TIMEOUT:-280}"; MAX_TOKENS="${CHEVAL_COUNCIL_MAX_TOKENS:-16000}"
 # Default voices bind to cheval agents that resolve to HEADLESS (subscription) adapters.
-# gpt-reviewer (codex/openai) + a claude reviewer + a gemini voice = distinct corpora.
-VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-gpt-reviewer,reviewing-code,deep-thinker}"
+# The operator's 4-voice set — DISTINCT model corpora for bias removal:
+#   jam-reviewer-claude → anthropic:claude-headless
+#   jam-reviewer-gpt    → openai:codex-headless
+#   jam-reviewer-cursor → cursor:cursor-headless  (Composer 2.5)
+#   deep-thinker        → google:gemini-headless
+# Four different families review the same diff so no single model's blind spot
+# decides the verdict. Override the set via FAGAN_PANEL_VOICES_CHEVAL.
+VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude-headless,jam-reviewer-gpt,jam-reviewer-cursor,deep-thinker}"
 CHEVAL=""
 # Force each voice straight onto its within-company HEADLESS terminal (kind:cli,
 # subscription-auth) instead of its HTTP primary. WHY (grounded 2026-06-06): the
@@ -101,6 +107,11 @@ EOF
 headless_model_for_voice() {
   local v="$1"
   case "$v" in
+    # cursor MUST precede the *reviewer* arm: jam-reviewer-cursor matches BOTH
+    # *cursor* and *reviewer*, and case picks the first arm top-down — without
+    # this, a cursor voice wrongly resolves to codex-headless. cursor is its own
+    # single-model provider (Composer 2.5), no within-company chain.
+    *cursor*)                                            echo "cursor:cursor-headless" ;;
     *gemini*|*deep-thinker*|*deep_thinker*|*gem-*)        echo "google:gemini-headless" ;;
     *claude*|*anthropic*|*native*|*opus*|*sonnet*)        echo "anthropic:claude-headless" ;;
     *gpt*|*codex*|*openai*|*reviewing-code*|*reviewer*)   echo "openai:codex-headless" ;;
