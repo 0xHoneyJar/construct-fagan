@@ -45,7 +45,7 @@ DIFF_PATH=""; OUT=""; TIMEOUT="${CHEVAL_COUNCIL_TIMEOUT:-280}"; MAX_TOKENS="${CH
 #   deep-thinker        → google:gemini-headless
 # Four different families review the same diff so no single model's blind spot
 # decides the verdict. Override the set via FAGAN_PANEL_VOICES_CHEVAL.
-VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude,jam-reviewer-gpt,jam-reviewer-cursor,deep-thinker}"
+VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude-headless,jam-reviewer-gpt,jam-reviewer-cursor,deep-thinker}"
 CHEVAL=""
 # Force each voice straight onto its within-company HEADLESS terminal (kind:cli,
 # subscription-auth) instead of its HTTP primary. WHY (grounded 2026-06-06): the
