@@ -42,6 +42,6 @@ boundaries:
   - "Not a generative reviewer — does not propose alternative architectures, only fixes for identified bugs"
 
 composes_with:
-  - codex-rescue   # implementer counterpart (Anthropic codex MCP)
+  - general-purpose   # implementer counterpart. DEPRECATED(codex-rescue→general-purpose, bd-ii1m)
   - artisan        # craft-gate cousin (different surface)
   - flatline       # planning reviewer (boundary, not overlap)
