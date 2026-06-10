@@ -107,13 +107,6 @@ EOF
 headless_model_for_voice() {
   local v="$1"
   case "$v" in
-    # fable MUST precede the *reviewer* AND *claude* arms (same top-down rule
-    # as cursor below): jam-reviewer-fable routes to the TOP intelligence tier
-    # on the operator's subscription (claude CLI --model fable; requires the
-    # claude-fable-headless entry in the hounfour SoT, loa#1003). Use for
-    # CRITICAL reviews: FAGAN_PANEL_VOICES_CHEVAL=...,jam-reviewer-fable or
-    # --voices.
-    *fable*)                                             echo "anthropic:claude-fable-headless" ;;
     # cursor MUST precede the *reviewer* arm: jam-reviewer-cursor matches BOTH
     # *cursor* and *reviewer*, and case picks the first arm top-down — without
     # this, a cursor voice wrongly resolves to codex-headless. cursor is its own
