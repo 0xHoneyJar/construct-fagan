@@ -43,9 +43,15 @@ DIFF_PATH=""; OUT=""; TIMEOUT="${CHEVAL_COUNCIL_TIMEOUT:-280}"; MAX_TOKENS="${CH
 #   jam-reviewer-gpt    → openai:codex-headless
 #   jam-reviewer-cursor → cursor:cursor-headless  (Composer 2.5)
 #   deep-thinker        → google:gemini-headless
-# Four different families review the same diff so no single model's blind spot
-# decides the verdict. Override the set via FAGAN_PANEL_VOICES_CHEVAL.
-VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude-headless,jam-reviewer-gpt,jam-reviewer-cursor,deep-thinker}"
+# Distinct families review the same diff so no single model's blind spot decides
+# the verdict. Override the set via FAGAN_PANEL_VOICES_CHEVAL.
+# deep-thinker (google:gemini-headless) is OMITTED from the default: the gemini
+# CLI returns IneligibleTierError ("no longer supported for Gemini Code Assist
+# for individuals" — deprecated tier, confirmed 2026-06-24), so it can only DROP
+# and burn a retry. The headless_model_for_voice mapping keeps it routable for
+# opt-in if a working gemini path returns. claude + codex + cursor is the live
+# cross-family set today.
+VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude-headless,jam-reviewer-gpt,jam-reviewer-cursor}"
 CHEVAL=""
 # Force each voice straight onto its within-company HEADLESS terminal (kind:cli,
 # subscription-auth) instead of its HTTP primary. WHY (grounded 2026-06-06): the
@@ -81,6 +87,18 @@ if [[ -z "$CHEVAL" ]]; then
   done
 fi
 [[ -n "$CHEVAL" && -f "$CHEVAL" ]] || { err "cheval.py not found (pass --cheval <path>)"; exit 2; }
+
+# cheval.py resolves its config (model-config.yaml) and the MODELINV audit log
+# (.run/model-invoke.jsonl) RELATIVE TO CWD. When the council is invoked from a
+# DIFFERENT repo than the one hosting cheval — the coordinator's cross-repo
+# spawn-in-cell dispatch via --cheval — running cheval.py from the council's cwd
+# leaves it unable to find its config, so every voice returns empty and ALL drop
+# (exit:2/empty). That is the arrakis-syjw "headless empty exit:2" keystone, the
+# cwd-tension branch: confirmed 2026-06-24 — the same diff returns real verdicts
+# (codex + cursor) when cheval.py runs from the cheval root, empty when it does
+# not. Pin the cheval root (the dir holding .claude/adapters/cheval.py) and run
+# every dispatch + audit-log read from there.
+CHEVAL_ROOT="$(cd "$(dirname "$CHEVAL")/../.." && pwd)"
 
 if [[ "$DIFF_PATH" == "-" ]]; then DIFF="$(cat)"; elif [[ -f "$DIFF_PATH" ]]; then DIFF="$(cat "$DIFF_PATH")"; else err "diff not found: $DIFF_PATH"; exit 2; fi
 [[ -n "$DIFF" ]] || { err "empty diff"; exit 2; }
@@ -147,15 +165,18 @@ for voice in "${VARR[@]}"; do
   raw="$WORK/$voice.json"; vqs="$WORK/$voice.vq.json"; ec=0
   # Snapshot the audit-log length so we attribute ONLY this voice's MODELINV entries
   # (fix: avoids the cross-voice race of a bare `tail -1` on the shared log).
-  before=0; [[ -f .run/model-invoke.jsonl ]] && before=$(wc -l < .run/model-invoke.jsonl 2>/dev/null || echo 0)
-  LOA_VERDICT_QUALITY_SIDECAR="$vqs" \
+  before=0; [[ -f "$CHEVAL_ROOT/.run/model-invoke.jsonl" ]] && before=$(wc -l < "$CHEVAL_ROOT/.run/model-invoke.jsonl" 2>/dev/null || echo 0)
+  # Dispatch FROM the cheval root so cheval.py resolves its config + audit log.
+  # $raw/$vqs/$DIFF_FILE/$PERSONA/$CHEVAL are all absolute (mktemp -d), so the
+  # subshell cd is safe; the redirect after the subshell captures its stdout.
+  ( cd "$CHEVAL_ROOT" && LOA_VERDICT_QUALITY_SIDECAR="$vqs" \
     python3 "$CHEVAL" --agent "$voice" "${model_flag[@]}" --input "$DIFF_FILE" --system "$PERSONA" \
-      --output-format json --json-errors --max-tokens "$MAX_TOKENS" --timeout "$TIMEOUT" \
+      --output-format json --json-errors --max-tokens "$MAX_TOKENS" --timeout "$TIMEOUT" ) \
       >"$raw" 2>"$WORK/$voice.stderr" || ec=$?
 
   content="$(jq -r '.content // empty' "$raw" 2>/dev/null || true)"
   # Read ONLY the entries THIS voice appended (per-voice attribution, no race).
-  model_ran="$(tail -n +"$((before+1))" .run/model-invoke.jsonl 2>/dev/null | jq -r '.payload.final_model_id // empty' 2>/dev/null | tail -1 || true)"
+  model_ran="$(tail -n +"$((before+1))" "$CHEVAL_ROOT/.run/model-invoke.jsonl" 2>/dev/null | jq -r '.payload.final_model_id // empty' 2>/dev/null | tail -1 || true)"
   [[ -n "$model_ran" ]] || model_ran="unknown"
 
   if [[ "$ec" -ne 0 || -z "$content" ]]; then
