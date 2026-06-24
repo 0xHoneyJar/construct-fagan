@@ -6,13 +6,13 @@
 #   /fagan used to call codex-review-api.sh directly — a SINGLE GPT-5.5 pass.
 #   A single model has a single blind spot: the model that wrote (or is biased
 #   like) the code is the one judging it. This dispatcher makes the cross-model
-#   COUNCIL (cheval-council.sh) the default — four DISTINCT model families
-#   (claude / gpt-codex / cursor-composer / gemini) review the same diff, so no
-#   one corpus's blind spot decides the verdict — and keeps the single-pass path
-#   as an explicit, documented FALLBACK.
+#   COUNCIL (cheval-council.sh) the default — DISTINCT model families
+#   (claude / gpt-codex / cursor-composer by default; gemini opt-in while its CLI
+#   is on a deprecated tier) review the same diff, so no one corpus's blind spot
+#   decides the verdict — and keeps the single-pass path as a documented FALLBACK.
 #
 # MODES (env FAGAN_REVIEW_MODE, default `council`):
-#   council  → scripts/cheval-council.sh  (4-voice cross-model, MODELINV audit,
+#   council  → scripts/cheval-council.sh  (cross-model, MODELINV audit,
 #              drop-discipline, fail-closed). THE DEFAULT.
 #   single   → scripts/codex-review-api.sh review-diff  (lean single GPT pass).
 #

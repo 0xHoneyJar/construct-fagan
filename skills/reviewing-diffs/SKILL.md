@@ -1,6 +1,6 @@
 ---
 name: reviewing-diffs
-description: Adversarial code review of a unified diff via a CROSS-MODEL council (4 distinct model families) by default, single-pass codex CLI as fallback. Returns structured JSON findings with line-anchored fixes.
+description: Adversarial code review of a unified diff via a CROSS-MODEL council (distinct model families) by default, single-pass codex CLI as fallback. Returns structured JSON findings with line-anchored fixes.
 allowed-tools: [Bash, Read]
 user-invocable: true
 ---
@@ -52,7 +52,7 @@ FAGAN_REVIEW_MODE=single bash scripts/fagan-review.sh path/to/changes.diff \
 
 | `FAGAN_REVIEW_MODE` | Backend | Models | Audit envelope | When |
 |---|---|---|---|---|
-| `council` (default) | `scripts/cheval-council.sh` | 4 distinct families | per-voice MODELINV | genuine cross-model SWE review |
+| `council` (default) | `scripts/cheval-council.sh` | distinct families (claude+codex+cursor) | per-voice MODELINV | genuine cross-model SWE review |
 | `single` | `scripts/codex-review-api.sh` | one GPT pass | none | fast single-opinion check; council unavailable |
 
 **Default voices** (`FAGAN_PANEL_VOICES_CHEVAL` to override) bind to subscription
