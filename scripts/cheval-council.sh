@@ -88,17 +88,25 @@ if [[ -z "$CHEVAL" ]]; then
 fi
 [[ -n "$CHEVAL" && -f "$CHEVAL" ]] || { err "cheval.py not found (pass --cheval <path>)"; exit 2; }
 
-# cheval.py resolves its config (model-config.yaml) and the MODELINV audit log
-# (.run/model-invoke.jsonl) RELATIVE TO CWD. When the council is invoked from a
-# DIFFERENT repo than the one hosting cheval — the coordinator's cross-repo
-# spawn-in-cell dispatch via --cheval — running cheval.py from the council's cwd
-# leaves it unable to find its config, so every voice returns empty and ALL drop
-# (exit:2/empty). That is the arrakis-syjw "headless empty exit:2" keystone, the
-# cwd-tension branch: confirmed 2026-06-24 — the same diff returns real verdicts
-# (codex + cursor) when cheval.py runs from the cheval root, empty when it does
-# not. Pin the cheval root (the dir holding .claude/adapters/cheval.py) and run
-# every dispatch + audit-log read from there.
-CHEVAL_ROOT="$(cd "$(dirname "$CHEVAL")/../.." && pwd)"
+# cheval.py resolves its config (model-config.yaml) RELATIVE TO CWD. When the
+# council is invoked from a DIFFERENT repo than the one hosting cheval — the
+# coordinator's cross-repo spawn-in-cell dispatch via --cheval — running
+# cheval.py from the council's cwd leaves it unable to find its config, so every
+# voice returns empty and ALL drop (exit:2/empty). That is the arrakis-syjw
+# "headless empty exit:2" keystone, the cwd-tension branch: confirmed 2026-06-24
+# — the same diff returns real verdicts (codex + cursor) when cheval.py runs from
+# the cheval root, empty when it does not. Pin the cheval root (the dir holding
+# .claude/adapters/cheval.py) and run every dispatch + audit-log read from there.
+#
+# First canonicalize CHEVAL to an ABSOLUTE, symlink-resolved path: the dispatch
+# below runs `python3 "$CHEVAL"` inside `( cd "$CHEVAL_ROOT" && … )`, so a
+# relative --cheval would otherwise resolve against CHEVAL_ROOT and break (caught
+# by the council reviewing this very fix). pwd -P resolves symlinks so
+# CHEVAL_ROOT and the MODELINV log it reads are the canonical ones.
+CHEVAL="$(cd "$(dirname "$CHEVAL")" && pwd -P)/$(basename "$CHEVAL")"
+CHEVAL_ROOT="$(cd "$(dirname "$CHEVAL")/../.." 2>/dev/null && pwd -P)"
+[[ -n "$CHEVAL_ROOT" && -f "$CHEVAL_ROOT/.claude/adapters/cheval.py" ]] || {
+  err "could not resolve cheval root from $CHEVAL (expected <root>/.claude/adapters/cheval.py)"; exit 2; }
 
 if [[ "$DIFF_PATH" == "-" ]]; then DIFF="$(cat)"; elif [[ -f "$DIFF_PATH" ]]; then DIFF="$(cat "$DIFF_PATH")"; else err "diff not found: $DIFF_PATH"; exit 2; fi
 [[ -n "$DIFF" ]] || { err "empty diff"; exit 2; }
