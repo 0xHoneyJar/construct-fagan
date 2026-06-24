@@ -28,7 +28,7 @@ single-pass output conforms to `schemas/codex-review-finding.schema.json`.
 ## Invocation
 
 ```bash
-# DEFAULT — cross-model 4-voice council (claude + gpt-codex + cursor + gemini)
+# DEFAULT — cross-model council (claude + gpt-codex + cursor; gemini opt-in)
 bash scripts/fagan-review.sh path/to/changes.diff
 
 # Council with an explicit cheval + voice set (e.g. for testing / pinned routing)

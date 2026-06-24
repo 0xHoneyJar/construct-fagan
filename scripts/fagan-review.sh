@@ -82,7 +82,7 @@ done
 case "$MODE" in
   council)
     [[ -x "$COUNCIL" || -f "$COUNCIL" ]] || { err "council script missing: $COUNCIL"; exit 2; }
-    err "review mode: COUNCIL (cross-model 4-voice) → $COUNCIL"
+    err "review mode: COUNCIL (cross-model) → $COUNCIL"
     ec=0
     bash "$COUNCIL" "$DIFF_PATH" "${COUNCIL_ARGS[@]}" || ec=$?
     if [[ "$ec" -eq 2 && "$COUNCIL_FALLBACK" == "1" ]]; then

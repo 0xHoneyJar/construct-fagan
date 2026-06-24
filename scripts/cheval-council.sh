@@ -38,7 +38,7 @@ err() { printf '[cheval-council] %s\n' "$*" >&2; }
 
 DIFF_PATH=""; OUT=""; TIMEOUT="${CHEVAL_COUNCIL_TIMEOUT:-280}"; MAX_TOKENS="${CHEVAL_COUNCIL_MAX_TOKENS:-16000}"
 # Default voices bind to cheval agents that resolve to HEADLESS (subscription) adapters.
-# The operator's 4-voice set — DISTINCT model corpora for bias removal:
+# The operator's voice set — DISTINCT model corpora for bias removal:
 #   jam-reviewer-claude → anthropic:claude-headless
 #   jam-reviewer-gpt    → openai:codex-headless
 #   jam-reviewer-cursor → cursor:cursor-headless  (Composer 2.5)
