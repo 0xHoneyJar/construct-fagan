@@ -13,7 +13,7 @@
 #   - lib-codex-exec.sh (auth check before codex invocation)
 #
 # Functions:
-#   ensure_codex_auth             → 0 if OPENAI_API_KEY set, 1 otherwise
+#   ensure_codex_auth             → 0 if OPENAI_API_KEY set OR ~/.codex/auth.json exists (codex CLI subscription auth, #3), 1 otherwise
 #   redact_secrets <content> [format] → redacted content (format: json|text)
 #   redact_log_output <input>     → filtered stderr content
 #   is_sensitive_file <filepath>  → 0 if file matches deny list

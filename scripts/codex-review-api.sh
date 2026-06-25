@@ -96,7 +96,7 @@ if [[ "$iter" -gt "$CODEX_REVIEW_MAX_ITERATIONS" ]]; then
   exit 0
 fi
 
-ensure_codex_auth || { err "OPENAI_API_KEY not set"; exit 4; }
+ensure_codex_auth || { err "no codex auth — set OPENAI_API_KEY or run 'codex login' to populate ~/.codex/auth.json (subscription auth, #3)"; exit 4; }
 
 # -----------------------------------------------------------------------------
 # Build content payload
