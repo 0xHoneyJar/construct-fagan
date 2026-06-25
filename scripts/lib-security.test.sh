@@ -41,5 +41,23 @@ redacts "JWT"                    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwI
 keeps "ordinary review prose"    "the function returns 401 on invalid creds and logs nothing"
 keeps "a short sk- false-friend" "the ask-201 ticket tracks this"
 
+# --- ensure_codex_auth: the auth gate (#3 — accept OPENAI_API_KEY OR ~/.codex/auth.json,
+#     so a ChatGPT-subscription codex user isn't told they need an API key). ----------
+eq() { # <name> <expected-rc> <actual-rc>
+  if [[ "$2" == "$3" ]]; then pass=$((pass+1)); printf '  ok   %s\n' "$1"
+  else fail=$((fail+1)); printf '  FAIL %s (expected rc %s, got %s)\n' "$1" "$2" "$3"; fi
+}
+( export OPENAI_API_KEY="sk-test-env-key"; ensure_codex_auth ) && r=0 || r=1
+eq "ensure_codex_auth: OPENAI_API_KEY set → 0" "0" "$r"
+
+_fakehome="$(mktemp -d)"; mkdir -p "$_fakehome/.codex"; printf '{"tokens":{}}' >"$_fakehome/.codex/auth.json"
+( unset OPENAI_API_KEY; export HOME="$_fakehome"; ensure_codex_auth ) && r=0 || r=1
+eq "ensure_codex_auth: ~/.codex/auth.json present, no env key → 0 (subscription posture)" "0" "$r"
+
+_emptyhome="$(mktemp -d)"
+( unset OPENAI_API_KEY; export HOME="$_emptyhome"; ensure_codex_auth ) && r=0 || r=1
+eq "ensure_codex_auth: neither env key nor auth.json → 1 (fail-closed)" "1" "$r"
+rm -rf "$_fakehome" "$_emptyhome"
+
 echo "lib-security.test: $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]
