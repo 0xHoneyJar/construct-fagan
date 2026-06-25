@@ -49,5 +49,21 @@ out2="$(bash "$SUT" --cheval "$MOCK" --voices "jam-reviewer-gpt,jam-reviewer-cur
 check "exit 0 when all voices alive" "0" "$rc2"
 check "all_alive flag is true" "true" "$(jq -r '.all_alive' <<<"$out2")"
 
+# --- E (council#11 self-audit): --force-headless toggles whether --model is forced, so
+#     the probe mirrors the council's routing. The mock marks DEAD only when --model holds
+#     "anthropic"; with --force-headless 0 no --model is passed → the claude voice reads
+#     ALIVE (not force-routed to the dead pin); with 1 it is forced DEAD. ---
+out3="$(bash "$SUT" --cheval "$MOCK" --voices "jam-reviewer-claude-headless" --force-headless 0 --json 2>/dev/null)"
+check "E: --force-headless 0 omits --model (claude not forced to dead pin → alive)" "alive" \
+  "$(jq -r '.voices[]|select(.voice|test("claude"))|.state' <<<"$out3")"
+out4="$(bash "$SUT" --cheval "$MOCK" --voices "jam-reviewer-claude-headless" --force-headless 1 --json 2>/dev/null)"
+check "E: --force-headless 1 forces --model (claude → dead anthropic pin)" "dead" \
+  "$(jq -r '.voices[]|select(.voice|test("claude"))|.state' <<<"$out4")"
+
+# --- F: --timeout is accepted and the probe still completes ---
+out5="$(bash "$SUT" --cheval "$MOCK" --voices "jam-reviewer-gpt" --timeout 30 --json 2>/dev/null)"
+check "F: --timeout accepted, probe completes (gpt alive)" "alive" \
+  "$(jq -r '.voices[]|select(.voice|test("gpt"))|.state' <<<"$out5")"
+
 echo "voice-health.test: $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]
