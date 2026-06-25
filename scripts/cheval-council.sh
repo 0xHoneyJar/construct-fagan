@@ -290,8 +290,13 @@ sys.stdout.write(first_json(t))
   # carry a why). cursor sometimes emits a bare CHANGES_REQUIRED with findings:[]
   # (observed on #83 + #307). Synthesize a placeholder finding so the panel always
   # states WHY it blocked instead of an empty, reasonless CHANGES_REQUIRED.
+  # H (council#11 self-audit, SAFE half): tag the placeholder `synthesized:true` so a
+  # consumer can DISTINGUISH a synthesized-from-an-empty-block finding from a real one
+  # (and decide for itself whether an unstructured CHANGES_REQUIRED should hard-block).
+  # The severity stays `major` — DOWNGRADING it (so an empty block no longer blocks) is a
+  # gate-strictness change = the operator's call (left per the #11 review, finding H).
   if [[ "$verdict" == "CHANGES_REQUIRED" && "$fcount" -eq 0 ]]; then
-    vjson="$(jq -c --arg v "$voice" '.findings = [{severity:"major", line:null, title:("voice " + $v + " returned CHANGES_REQUIRED with no structured findings"), fix:"the voice raised an objection its output did not structure into findings — inspect the raw response or re-run that voice; do NOT read this as a clean, reasoned block."}]' <<<"$vjson" 2>/dev/null || echo "$vjson")"
+    vjson="$(jq -c --arg v "$voice" '.findings = [{severity:"major", synthesized:true, line:null, title:("voice " + $v + " returned CHANGES_REQUIRED with no structured findings"), fix:"the voice raised an objection its output did not structure into findings — inspect the raw response or re-run that voice; do NOT read this as a clean, reasoned block."}]' <<<"$vjson" 2>/dev/null || echo "$vjson")"
     fcount=1
   fi
   [[ "$verdict" == "CHANGES_REQUIRED" ]] && any_changes=1
