@@ -229,6 +229,15 @@ sys.stdout.write(first_json(t))
   verdict="$(jq -r '.verdict // "CHANGES_REQUIRED"' <<<"$vjson" 2>/dev/null || echo CHANGES_REQUIRED)"
   case "$verdict" in APPROVED|CHANGES_REQUIRED) ;; *) verdict="CHANGES_REQUIRED" ;; esac
   fcount="$(jq -r '[.findings[]?] | length' <<<"$vjson" 2>/dev/null || echo 0)"
+  # Council honesty: a voice that BLOCKS (CHANGES_REQUIRED) but lists NO findings
+  # flips the council verdict with NO stated reason — a numb gate (a block must
+  # carry a why). cursor sometimes emits a bare CHANGES_REQUIRED with findings:[]
+  # (observed on #83 + #307). Synthesize a placeholder finding so the panel always
+  # states WHY it blocked instead of an empty, reasonless CHANGES_REQUIRED.
+  if [[ "$verdict" == "CHANGES_REQUIRED" && "$fcount" -eq 0 ]]; then
+    vjson="$(jq -c --arg v "$voice" '.findings = [{severity:"major", line:null, title:("voice " + $v + " returned CHANGES_REQUIRED with no structured findings"), fix:"the voice raised an objection its output did not structure into findings — inspect the raw response or re-run that voice; do NOT read this as a clean, reasoned block."}]' <<<"$vjson" 2>/dev/null || echo "$vjson")"
+    fcount=1
+  fi
   [[ "$verdict" == "CHANGES_REQUIRED" ]] && any_changes=1
   survived=$((survived+1))
   err "  voice '$voice' → $verdict ($fcount findings) · model_ran=$model_ran"
