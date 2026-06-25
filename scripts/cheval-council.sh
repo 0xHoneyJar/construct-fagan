@@ -64,16 +64,25 @@ CHEVAL=""
 # CHEVAL_COUNCIL_FORCE_HEADLESS=0 to keep the HTTP-first chain (use when API quota
 # is live and you want the full chain-walk + verdict-quality envelope).
 FORCE_HEADLESS="${CHEVAL_COUNCIL_FORCE_HEADLESS:-1}"
+# Opt-in preflight (#8): probe each voice's liveness through cheval BEFORE the
+# real dispatch, so an INFRASTRUCTURE failure (unbound voice, missing headless
+# adapter, wrong cheval generation) refuses with ONE actionable message instead
+# of N×(exit:2/empty) that's indistinguishable from a model failure. Default OFF
+# (backward-compatible); MANDATED-council surfaces should set it on.
+PREFLIGHT="${CHEVAL_COUNCIL_PREFLIGHT:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --voices)     VOICES="$2"; shift 2 ;;
-    --out)        OUT="$2"; shift 2 ;;
-    --cheval)     CHEVAL="$2"; shift 2 ;;
-    --timeout)    TIMEOUT="$2"; shift 2 ;;
-    --max-tokens) MAX_TOKENS="$2"; shift 2 ;;
-    -*)           err "unknown flag $1"; exit 2 ;;
-    *)            DIFF_PATH="$1"; shift ;;
+    --voices)      VOICES="$2"; shift 2 ;;
+    --out)         OUT="$2"; shift 2 ;;
+    --cheval)      CHEVAL="$2"; shift 2 ;;
+    --timeout)     TIMEOUT="$2"; shift 2 ;;
+    --max-tokens)  MAX_TOKENS="$2"; shift 2 ;;
+    --preflight)   PREFLIGHT=1; shift ;;
+    --no-preflight) PREFLIGHT=0; shift ;;
+    -*)            err "unknown flag $1"; exit 2 ;;
+    *)             DIFF_PATH="$1"; shift ;;
   esac
 done
 [[ -n "$DIFF_PATH" ]] || { err "usage: cheval-council.sh <diff|-> [--voices a,b,c]"; exit 2; }
@@ -151,6 +160,32 @@ headless_model_for_voice() {
     *)                                                     echo "openai:codex-headless" ;;
   esac
 }
+
+# Preflight (#8): probe each voice's liveness through cheval BEFORE the real
+# dispatch when requested. An all-infrastructure-failure (no voice reachable) is
+# the council's catastrophic case — refuse HERE with the dead-voice reasons + the
+# fix, rather than dispatch N reviews and return N×(exit:2/empty) that reads like
+# a model failure. Alive voices proceed (the degraded-panel below carries a
+# partial drop). Reuses voice-health.sh — the sibling probe.
+if [[ "$PREFLIGHT" -eq 1 && -x "$SCRIPT_DIR/voice-health.sh" ]]; then
+  # voice-health EXITS NON-ZERO when a voice is dead (by design — that IS the
+  # signal). Capture its JSON regardless of exit; never `|| echo '{}'` here — that
+  # would append a SECOND object on the expected non-zero exit and jq would read
+  # both (the "N\n0" arithmetic bug).
+  vh="$(bash "$SCRIPT_DIR/voice-health.sh" --voices "$VOICES" --cheval "$CHEVAL" --json 2>/dev/null)" || true
+  [[ -n "$vh" ]] || vh='{}'
+  vh_alive="$(jq -r '.alive // 0' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"; vh_alive="${vh_alive:-0}"
+  vh_dead="$(jq -r '.dead // 0' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"; vh_dead="${vh_dead:-0}"
+  if [[ "${vh_dead:-0}" -gt 0 ]]; then
+    err "⚠ preflight — $vh_alive alive, $vh_dead DEAD: $(jq -c '[.voices[]|select(.state=="dead")|{voice,reason:(.reason[0:90])}]' <<<"$vh" 2>/dev/null || echo '[]')"
+  fi
+  if [[ "${vh_alive:-0}" -eq 0 ]]; then
+    result="$(jq -nc --argjson vh "$vh" '{verdict:"CHANGES_REQUIRED", error:"preflight_all_voices_dead", summary:"preflight refused — no voice reachable through cheval", panel:{routed_via:"cheval", preflight:$vh, voices:[], dropped:($vh.voices // [])}}')"
+    [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
+    err "✗ PREFLIGHT REFUSED (#8) — NO voice is reachable through cheval; the mandated council cannot run. ONE actionable cause (not N×exit:2): check (a) each voice is BOUND in the target repo's cheval registry, (b) the headless adapter exists for this cheval generation (FORCE_HEADLESS=$FORCE_HEADLESS), (c) the dead-voice reasons above (e.g. a dead model pin like fable, or a missing adapter). Run scripts/voice-health.sh standalone to diagnose."
+    exit 3
+  fi
+fi
 
 panel_voices_json="[]"; dropped_json="[]"; models_ran_json="[]"
 any_changes=0; survived=0
