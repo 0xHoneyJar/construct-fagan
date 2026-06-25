@@ -27,12 +27,20 @@ err() { printf '[voice-health] %s\n' "$*" >&2; }
 VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude-headless,jam-reviewer-gpt,jam-reviewer-cursor}"
 CHEVAL=""
 JSON=0
+# Probe with the SAME routing + timeout the council will use (council#11 self-review,
+# E/F): force the headless terminal only when the council would (FORCE_HEADLESS=1), and
+# use the council's timeout — else a slow-but-healthy voice (>90s) or a different route
+# gets mis-flagged pre-flight versus the real dispatch.
+TIMEOUT_S="${VOICE_HEALTH_TIMEOUT:-90}"
+FORCE_HEADLESS="${CHEVAL_COUNCIL_FORCE_HEADLESS:-1}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --voices) VOICES="${2:-}"; shift 2 ;;
-    --cheval) CHEVAL="${2:-}"; shift 2 ;;
-    --json)   JSON=1; shift ;;
-    -h|--help) err "usage: voice-health.sh [--voices a,b,c] [--cheval <path>] [--json]"; exit 2 ;;
+    --voices)         VOICES="${2:-}"; shift 2 ;;
+    --cheval)         CHEVAL="${2:-}"; shift 2 ;;
+    --timeout)        TIMEOUT_S="${2:-90}"; shift 2 ;;
+    --force-headless) FORCE_HEADLESS="${2:-1}"; shift 2 ;;
+    --json)           JSON=1; shift ;;
+    -h|--help) err "usage: voice-health.sh [--voices a,b,c] [--cheval <path>] [--timeout <s>] [--force-headless 0|1] [--json]"; exit 2 ;;
     *) err "unknown arg: $1"; exit 2 ;;
   esac
 done
@@ -75,8 +83,12 @@ for raw in ${VLIST[@]+"${VLIST[@]}"}; do
   voice="$(printf '%s' "$raw" | xargs)"   # trim whitespace
   [[ -z "$voice" ]] && continue
   model="$(headless_model_for_voice "$voice")"
-  err "probing $voice → $model …"
-  out="$( ( cd "$CHEVAL_ROOT" && timeout 90 python3 "$CHEVAL" --agent "$voice" --model "$model" --input "$PROBE" --system "$SYS" --output-format json ) 2>"$WORK/err" )" || true
+  # E: force the headless terminal ONLY when the council would (FORCE_HEADLESS=1);
+  # otherwise probe the voice's default chain — the exact path the real dispatch takes.
+  model_flag=()
+  if [[ "$FORCE_HEADLESS" -eq 1 ]]; then model_flag=(--model "$model"); route="$model"; else route="$voice default-chain"; fi
+  err "probing $voice → $route (timeout ${TIMEOUT_S}s) …"
+  out="$( ( cd "$CHEVAL_ROOT" && timeout "$TIMEOUT_S" python3 "$CHEVAL" --agent "$voice" ${model_flag[@]+"${model_flag[@]}"} --input "$PROBE" --system "$SYS" --output-format json ) 2>"$WORK/err" )" || true
   content="$(jq -r 'if (.error // false) then "" else (.content // "") end' <<<"$out" 2>/dev/null || echo "")"
   if [[ -n "$content" && "$content" != "null" ]]; then
     state="alive"; alive=$((alive + 1)); reason=""

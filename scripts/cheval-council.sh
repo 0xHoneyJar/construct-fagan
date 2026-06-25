@@ -181,7 +181,9 @@ if [[ "$PREFLIGHT" -eq 1 ]]; then
   # signal). Capture its JSON regardless of exit; never `|| echo '{}'` here — that
   # would append a SECOND object on the expected non-zero exit and jq would read
   # both (the "N\n0" arithmetic bug).
-  vh="$(bash "$SCRIPT_DIR/voice-health.sh" --voices "$VOICES" --cheval "$CHEVAL" --json 2>/dev/null)" || true
+  # E/F: probe with the SAME routing + timeout the real council uses, so a slow-but-
+  # healthy voice or a non-headless route isn't mis-flagged pre-flight.
+  vh="$(bash "$SCRIPT_DIR/voice-health.sh" --voices "$VOICES" --cheval "$CHEVAL" --timeout "${TIMEOUT:-280}" --force-headless "$FORCE_HEADLESS" --json 2>/dev/null)" || true
   # D (council#11 self-review): distinguish PROBE-INFRA failure (voice-health itself
   # broke — empty/garbled stdout) from genuinely-dead voices. Require a parseable JSON
   # carrying a voice count before trusting alive/dead — else an empty probe mis-refuses
