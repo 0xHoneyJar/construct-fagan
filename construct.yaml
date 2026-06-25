@@ -35,7 +35,7 @@ expertise:
   - convergence loop discipline
 
 compose_with:
-  - codex-rescue
+  - general-purpose   # DEPRECATED(codex-rescue→general-purpose, bd-ii1m)
   - artisan
   - flatline
 
