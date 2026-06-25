@@ -245,9 +245,28 @@ fi
 
 verdict="APPROVED"; [[ "$any_changes" -eq 1 ]] && verdict="CHANGES_REQUIRED"
 ndrop="$(jq 'length' <<<"$dropped_json")"
-summary="cheval-routed · $survived voice(s) survived, $ndrop dropped · verdict $verdict"
-result="$(jq -nc --arg verdict "$verdict" --arg summary "$summary" --argjson v "$panel_voices_json" --argjson d "$dropped_json" --argjson m "$models_ran_json" \
-  '{verdict:$verdict, summary:$summary, panel:{routed_via:"cheval", voices:$v, dropped:$d, models_ran:$m}}')"
+nplanned=$(( survived + ndrop ))
+
+# Panel-health floor — the council's core guarantee (see header: "Distinct
+# families review the same diff so no single model's blind spot decides"). Each
+# voice slot is a distinct family by construction, so a verdict from FEWER than
+# 2 surviving voices is effectively SINGLE-PERSPECTIVE: the cross-model coverage
+# the council exists to provide is NOT met. A dropped voice must never silently
+# shrink the panel to one and still read as a "council" verdict — surface it
+# LOUDLY + in the JSON (consumers gate on panel.multi_perspective_met). This is
+# the immune response to a paid voice going dark unnoticed (e.g. a dead model
+# pin like fable→Fable-5-unavailable) instead of the panel quietly halving.
+multi_perspective_met=true
+if [[ "$survived" -lt 2 ]]; then
+  multi_perspective_met=false
+  err "⚠⚠ PANEL DEGRADED TO SINGLE-VOICE — only $survived of $nplanned voices survived; the cross-model (multi-family) guarantee is NOT met. Treat this verdict as single-perspective. Dropped: $(jq -c '[.[]|{voice,reason}]' <<<"$dropped_json")"
+elif [[ "$ndrop" -gt 0 ]]; then
+  err "⚠ panel degraded — $ndrop of $nplanned voices dropped (guarantee still met: $survived families survived). Dropped: $(jq -c '[.[]|{voice,reason}]' <<<"$dropped_json")"
+fi
+
+summary="cheval-routed · $survived/$nplanned voices survived, $ndrop dropped · multi_perspective=$multi_perspective_met · verdict $verdict"
+result="$(jq -nc --arg verdict "$verdict" --arg summary "$summary" --argjson v "$panel_voices_json" --argjson d "$dropped_json" --argjson m "$models_ran_json" --argjson vs "$survived" --argjson vp "$nplanned" --argjson mpm "$multi_perspective_met" \
+  '{verdict:$verdict, summary:$summary, panel:{routed_via:"cheval", voices:$v, dropped:$d, models_ran:$m, voices_survived:$vs, voices_planned:$vp, multi_perspective_met:$mpm}}')"
 [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
 err "$summary"
 [[ "$verdict" == "APPROVED" ]] && exit 0 || exit 1
