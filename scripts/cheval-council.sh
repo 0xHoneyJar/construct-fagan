@@ -167,13 +167,32 @@ headless_model_for_voice() {
 # fix, rather than dispatch N reviews and return N×(exit:2/empty) that reads like
 # a model failure. Alive voices proceed (the degraded-panel below carries a
 # partial drop). Reuses voice-health.sh — the sibling probe.
-if [[ "$PREFLIGHT" -eq 1 && -x "$SCRIPT_DIR/voice-health.sh" ]]; then
+if [[ "$PREFLIGHT" -eq 1 ]]; then
+  # C (council#11 self-review): a MANDATED preflight must NOT silently skip. If the
+  # probe is unavailable, fail closed here — never fall through to a full dispatch
+  # that the operator asked to gate.
+  if [[ ! -x "$SCRIPT_DIR/voice-health.sh" ]]; then
+    result="$(jq -nc '{verdict:"CHANGES_REQUIRED", error:"preflight_probe_unavailable", summary:"--preflight requested but voice-health.sh is missing or not executable"}')"
+    [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
+    err "✗ PREFLIGHT REFUSED — --preflight requested but $SCRIPT_DIR/voice-health.sh is missing or not executable; a mandated preflight cannot silently skip the probe."
+    exit 2
+  fi
   # voice-health EXITS NON-ZERO when a voice is dead (by design — that IS the
   # signal). Capture its JSON regardless of exit; never `|| echo '{}'` here — that
   # would append a SECOND object on the expected non-zero exit and jq would read
   # both (the "N\n0" arithmetic bug).
   vh="$(bash "$SCRIPT_DIR/voice-health.sh" --voices "$VOICES" --cheval "$CHEVAL" --json 2>/dev/null)" || true
-  [[ -n "$vh" ]] || vh='{}'
+  # D (council#11 self-review): distinguish PROBE-INFRA failure (voice-health itself
+  # broke — empty/garbled stdout) from genuinely-dead voices. Require a parseable JSON
+  # carrying a voice count before trusting alive/dead — else an empty probe mis-refuses
+  # as "all voices dead", conflating two very different failures.
+  vh_total="$(jq -r '((.alive // 0) + (.dead // 0))' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"
+  if [[ -z "$vh_total" || "${vh_total:-0}" -eq 0 ]]; then
+    result="$(jq -nc '{verdict:"CHANGES_REQUIRED", error:"preflight_probe_failed", summary:"voice-health returned no parseable result — probe-infrastructure failure, NOT a dead-voices verdict"}')"
+    [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
+    err "✗ PREFLIGHT PROBE FAILED — voice-health.sh produced no parseable JSON (probe-infra issue, not a voices verdict). Re-run it standalone (drop the 2>/dev/null) to see the cause."
+    exit 2
+  fi
   vh_alive="$(jq -r '.alive // 0' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"; vh_alive="${vh_alive:-0}"
   vh_dead="$(jq -r '.dead // 0' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"; vh_dead="${vh_dead:-0}"
   if [[ "${vh_dead:-0}" -gt 0 ]]; then
