@@ -38,14 +38,20 @@ err() { printf '[cheval-council] %s\n' "$*" >&2; }
 
 DIFF_PATH=""; OUT=""; TIMEOUT="${CHEVAL_COUNCIL_TIMEOUT:-280}"; MAX_TOKENS="${CHEVAL_COUNCIL_MAX_TOKENS:-16000}"
 # Default voices bind to cheval agents that resolve to HEADLESS (subscription) adapters.
-# The operator's 4-voice set — DISTINCT model corpora for bias removal:
+# The operator's voice set — DISTINCT model corpora for bias removal:
 #   jam-reviewer-claude → anthropic:claude-headless
 #   jam-reviewer-gpt    → openai:codex-headless
 #   jam-reviewer-cursor → cursor:cursor-headless  (Composer 2.5)
 #   deep-thinker        → google:gemini-headless
-# Four different families review the same diff so no single model's blind spot
-# decides the verdict. Override the set via FAGAN_PANEL_VOICES_CHEVAL.
-VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude-headless,jam-reviewer-gpt,jam-reviewer-cursor,deep-thinker}"
+# Distinct families review the same diff so no single model's blind spot decides
+# the verdict. Override the set via FAGAN_PANEL_VOICES_CHEVAL.
+# deep-thinker (google:gemini-headless) is OMITTED from the default: the gemini
+# CLI returns IneligibleTierError ("no longer supported for Gemini Code Assist
+# for individuals" — deprecated tier, confirmed 2026-06-24), so it can only DROP
+# and burn a retry. The headless_model_for_voice mapping keeps it routable for
+# opt-in if a working gemini path returns. claude + codex + cursor is the live
+# cross-family set today.
+VOICES="${FAGAN_PANEL_VOICES_CHEVAL:-jam-reviewer-claude-headless,jam-reviewer-gpt,jam-reviewer-cursor}"
 CHEVAL=""
 # Force each voice straight onto its within-company HEADLESS terminal (kind:cli,
 # subscription-auth) instead of its HTTP primary. WHY (grounded 2026-06-06): the
@@ -58,16 +64,25 @@ CHEVAL=""
 # CHEVAL_COUNCIL_FORCE_HEADLESS=0 to keep the HTTP-first chain (use when API quota
 # is live and you want the full chain-walk + verdict-quality envelope).
 FORCE_HEADLESS="${CHEVAL_COUNCIL_FORCE_HEADLESS:-1}"
+# Opt-in preflight (#8): probe each voice's liveness through cheval BEFORE the
+# real dispatch, so an INFRASTRUCTURE failure (unbound voice, missing headless
+# adapter, wrong cheval generation) refuses with ONE actionable message instead
+# of N×(exit:2/empty) that's indistinguishable from a model failure. Default OFF
+# (backward-compatible); MANDATED-council surfaces should set it on.
+PREFLIGHT="${CHEVAL_COUNCIL_PREFLIGHT:-0}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --voices)     VOICES="$2"; shift 2 ;;
-    --out)        OUT="$2"; shift 2 ;;
-    --cheval)     CHEVAL="$2"; shift 2 ;;
-    --timeout)    TIMEOUT="$2"; shift 2 ;;
-    --max-tokens) MAX_TOKENS="$2"; shift 2 ;;
-    -*)           err "unknown flag $1"; exit 2 ;;
-    *)            DIFF_PATH="$1"; shift ;;
+    --voices)      VOICES="$2"; shift 2 ;;
+    --out)         OUT="$2"; shift 2 ;;
+    --cheval)      CHEVAL="$2"; shift 2 ;;
+    --timeout)     TIMEOUT="$2"; shift 2 ;;
+    --max-tokens)  MAX_TOKENS="$2"; shift 2 ;;
+    --preflight)   PREFLIGHT=1; shift ;;
+    --no-preflight) PREFLIGHT=0; shift ;;
+    -*)            err "unknown flag $1"; exit 2 ;;
+    *)             DIFF_PATH="$1"; shift ;;
   esac
 done
 [[ -n "$DIFF_PATH" ]] || { err "usage: cheval-council.sh <diff|-> [--voices a,b,c]"; exit 2; }
@@ -81,6 +96,26 @@ if [[ -z "$CHEVAL" ]]; then
   done
 fi
 [[ -n "$CHEVAL" && -f "$CHEVAL" ]] || { err "cheval.py not found (pass --cheval <path>)"; exit 2; }
+
+# cheval.py resolves its config (model-config.yaml) RELATIVE TO CWD. When the
+# council is invoked from a DIFFERENT repo than the one hosting cheval — the
+# coordinator's cross-repo spawn-in-cell dispatch via --cheval — running
+# cheval.py from the council's cwd leaves it unable to find its config, so every
+# voice returns empty and ALL drop (exit:2/empty). That is the arrakis-syjw
+# "headless empty exit:2" keystone, the cwd-tension branch: confirmed 2026-06-24
+# — the same diff returns real verdicts (codex + cursor) when cheval.py runs from
+# the cheval root, empty when it does not. Pin the cheval root (the dir holding
+# .claude/adapters/cheval.py) and run every dispatch + audit-log read from there.
+#
+# First canonicalize CHEVAL to an ABSOLUTE, symlink-resolved path: the dispatch
+# below runs `python3 "$CHEVAL"` inside `( cd "$CHEVAL_ROOT" && … )`, so a
+# relative --cheval would otherwise resolve against CHEVAL_ROOT and break (caught
+# by the council reviewing this very fix). pwd -P resolves symlinks so
+# CHEVAL_ROOT and the MODELINV log it reads are the canonical ones.
+CHEVAL="$(cd "$(dirname "$CHEVAL")" && pwd -P)/$(basename "$CHEVAL")"
+CHEVAL_ROOT="$(cd "$(dirname "$CHEVAL")/../.." 2>/dev/null && pwd -P)"
+[[ -n "$CHEVAL_ROOT" && -f "$CHEVAL_ROOT/.claude/adapters/cheval.py" ]] || {
+  err "could not resolve cheval root from $CHEVAL (expected <root>/.claude/adapters/cheval.py)"; exit 2; }
 
 if [[ "$DIFF_PATH" == "-" ]]; then DIFF="$(cat)"; elif [[ -f "$DIFF_PATH" ]]; then DIFF="$(cat "$DIFF_PATH")"; else err "diff not found: $DIFF_PATH"; exit 2; fi
 [[ -n "$DIFF" ]] || { err "empty diff"; exit 2; }
@@ -126,6 +161,53 @@ headless_model_for_voice() {
   esac
 }
 
+# Preflight (#8): probe each voice's liveness through cheval BEFORE the real
+# dispatch when requested. An all-infrastructure-failure (no voice reachable) is
+# the council's catastrophic case — refuse HERE with the dead-voice reasons + the
+# fix, rather than dispatch N reviews and return N×(exit:2/empty) that reads like
+# a model failure. Alive voices proceed (the degraded-panel below carries a
+# partial drop). Reuses voice-health.sh — the sibling probe.
+if [[ "$PREFLIGHT" -eq 1 ]]; then
+  # C (council#11 self-review): a MANDATED preflight must NOT silently skip. If the
+  # probe is unavailable, fail closed here — never fall through to a full dispatch
+  # that the operator asked to gate.
+  if [[ ! -x "$SCRIPT_DIR/voice-health.sh" ]]; then
+    result="$(jq -nc '{verdict:"CHANGES_REQUIRED", error:"preflight_probe_unavailable", summary:"--preflight requested but voice-health.sh is missing or not executable"}')"
+    [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
+    err "✗ PREFLIGHT REFUSED — --preflight requested but $SCRIPT_DIR/voice-health.sh is missing or not executable; a mandated preflight cannot silently skip the probe."
+    exit 2
+  fi
+  # voice-health EXITS NON-ZERO when a voice is dead (by design — that IS the
+  # signal). Capture its JSON regardless of exit; never `|| echo '{}'` here — that
+  # would append a SECOND object on the expected non-zero exit and jq would read
+  # both (the "N\n0" arithmetic bug).
+  # E/F: probe with the SAME routing + timeout the real council uses, so a slow-but-
+  # healthy voice or a non-headless route isn't mis-flagged pre-flight.
+  vh="$(bash "$SCRIPT_DIR/voice-health.sh" --voices "$VOICES" --cheval "$CHEVAL" --timeout "${TIMEOUT:-280}" --force-headless "$FORCE_HEADLESS" --json 2>/dev/null)" || true
+  # D (council#11 self-review): distinguish PROBE-INFRA failure (voice-health itself
+  # broke — empty/garbled stdout) from genuinely-dead voices. Require a parseable JSON
+  # carrying a voice count before trusting alive/dead — else an empty probe mis-refuses
+  # as "all voices dead", conflating two very different failures.
+  vh_total="$(jq -r '((.alive // 0) + (.dead // 0))' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"
+  if [[ -z "$vh_total" || "${vh_total:-0}" -eq 0 ]]; then
+    result="$(jq -nc '{verdict:"CHANGES_REQUIRED", error:"preflight_probe_failed", summary:"voice-health returned no parseable result — probe-infrastructure failure, NOT a dead-voices verdict"}')"
+    [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
+    err "✗ PREFLIGHT PROBE FAILED — voice-health.sh produced no parseable JSON (probe-infra issue, not a voices verdict). Re-run it standalone (drop the 2>/dev/null) to see the cause."
+    exit 2
+  fi
+  vh_alive="$(jq -r '.alive // 0' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"; vh_alive="${vh_alive:-0}"
+  vh_dead="$(jq -r '.dead // 0' <<<"$vh" 2>/dev/null | head -1 | tr -dc '0-9')"; vh_dead="${vh_dead:-0}"
+  if [[ "${vh_dead:-0}" -gt 0 ]]; then
+    err "⚠ preflight — $vh_alive alive, $vh_dead DEAD: $(jq -c '[.voices[]|select(.state=="dead")|{voice,reason:(.reason[0:90])}]' <<<"$vh" 2>/dev/null || echo '[]')"
+  fi
+  if [[ "${vh_alive:-0}" -eq 0 ]]; then
+    result="$(jq -nc --argjson vh "$vh" '{verdict:"CHANGES_REQUIRED", error:"preflight_all_voices_dead", summary:"preflight refused — no voice reachable through cheval", panel:{routed_via:"cheval", preflight:$vh, voices:[], dropped:($vh.voices // [])}}')"
+    [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
+    err "✗ PREFLIGHT REFUSED (#8) — NO voice is reachable through cheval; the mandated council cannot run. ONE actionable cause (not N×exit:2): check (a) each voice is BOUND in the target repo's cheval registry, (b) the headless adapter exists for this cheval generation (FORCE_HEADLESS=$FORCE_HEADLESS), (c) the dead-voice reasons above (e.g. a dead model pin like fable, or a missing adapter). Run scripts/voice-health.sh standalone to diagnose."
+    exit 3
+  fi
+fi
+
 panel_voices_json="[]"; dropped_json="[]"; models_ran_json="[]"
 any_changes=0; survived=0
 
@@ -147,15 +229,18 @@ for voice in "${VARR[@]}"; do
   raw="$WORK/$voice.json"; vqs="$WORK/$voice.vq.json"; ec=0
   # Snapshot the audit-log length so we attribute ONLY this voice's MODELINV entries
   # (fix: avoids the cross-voice race of a bare `tail -1` on the shared log).
-  before=0; [[ -f .run/model-invoke.jsonl ]] && before=$(wc -l < .run/model-invoke.jsonl 2>/dev/null || echo 0)
-  LOA_VERDICT_QUALITY_SIDECAR="$vqs" \
+  before=0; [[ -f "$CHEVAL_ROOT/.run/model-invoke.jsonl" ]] && before=$(wc -l < "$CHEVAL_ROOT/.run/model-invoke.jsonl" 2>/dev/null || echo 0)
+  # Dispatch FROM the cheval root so cheval.py resolves its config + audit log.
+  # $raw/$vqs/$DIFF_FILE/$PERSONA/$CHEVAL are all absolute (mktemp -d), so the
+  # subshell cd is safe; the redirect after the subshell captures its stdout.
+  ( cd "$CHEVAL_ROOT" && LOA_VERDICT_QUALITY_SIDECAR="$vqs" \
     python3 "$CHEVAL" --agent "$voice" "${model_flag[@]}" --input "$DIFF_FILE" --system "$PERSONA" \
-      --output-format json --json-errors --max-tokens "$MAX_TOKENS" --timeout "$TIMEOUT" \
+      --output-format json --json-errors --max-tokens "$MAX_TOKENS" --timeout "$TIMEOUT" ) \
       >"$raw" 2>"$WORK/$voice.stderr" || ec=$?
 
   content="$(jq -r '.content // empty' "$raw" 2>/dev/null || true)"
   # Read ONLY the entries THIS voice appended (per-voice attribution, no race).
-  model_ran="$(tail -n +"$((before+1))" .run/model-invoke.jsonl 2>/dev/null | jq -r '.payload.final_model_id // empty' 2>/dev/null | tail -1 || true)"
+  model_ran="$(tail -n +"$((before+1))" "$CHEVAL_ROOT/.run/model-invoke.jsonl" 2>/dev/null | jq -r '.payload.final_model_id // empty' 2>/dev/null | tail -1 || true)"
   [[ -n "$model_ran" ]] || model_ran="unknown"
 
   if [[ "$ec" -ne 0 || -z "$content" ]]; then
@@ -200,6 +285,20 @@ sys.stdout.write(first_json(t))
   verdict="$(jq -r '.verdict // "CHANGES_REQUIRED"' <<<"$vjson" 2>/dev/null || echo CHANGES_REQUIRED)"
   case "$verdict" in APPROVED|CHANGES_REQUIRED) ;; *) verdict="CHANGES_REQUIRED" ;; esac
   fcount="$(jq -r '[.findings[]?] | length' <<<"$vjson" 2>/dev/null || echo 0)"
+  # Council honesty: a voice that BLOCKS (CHANGES_REQUIRED) but lists NO findings
+  # flips the council verdict with NO stated reason — a numb gate (a block must
+  # carry a why). cursor sometimes emits a bare CHANGES_REQUIRED with findings:[]
+  # (observed on #83 + #307). Synthesize a placeholder finding so the panel always
+  # states WHY it blocked instead of an empty, reasonless CHANGES_REQUIRED.
+  # H (council#11 self-audit, SAFE half): tag the placeholder `synthesized:true` so a
+  # consumer can DISTINGUISH a synthesized-from-an-empty-block finding from a real one
+  # (and decide for itself whether an unstructured CHANGES_REQUIRED should hard-block).
+  # The severity stays `major` — DOWNGRADING it (so an empty block no longer blocks) is a
+  # gate-strictness change = the operator's call (left per the #11 review, finding H).
+  if [[ "$verdict" == "CHANGES_REQUIRED" && "$fcount" -eq 0 ]]; then
+    vjson="$(jq -c --arg v "$voice" '.findings = [{severity:"major", synthesized:true, line:null, title:("voice " + $v + " returned CHANGES_REQUIRED with no structured findings"), fix:"the voice raised an objection its output did not structure into findings — inspect the raw response or re-run that voice; do NOT read this as a clean, reasoned block."}]' <<<"$vjson" 2>/dev/null || echo "$vjson")"
+    fcount=1
+  fi
   [[ "$verdict" == "CHANGES_REQUIRED" ]] && any_changes=1
   survived=$((survived+1))
   err "  voice '$voice' → $verdict ($fcount findings) · model_ran=$model_ran"
@@ -216,9 +315,28 @@ fi
 
 verdict="APPROVED"; [[ "$any_changes" -eq 1 ]] && verdict="CHANGES_REQUIRED"
 ndrop="$(jq 'length' <<<"$dropped_json")"
-summary="cheval-routed · $survived voice(s) survived, $ndrop dropped · verdict $verdict"
-result="$(jq -nc --arg verdict "$verdict" --arg summary "$summary" --argjson v "$panel_voices_json" --argjson d "$dropped_json" --argjson m "$models_ran_json" \
-  '{verdict:$verdict, summary:$summary, panel:{routed_via:"cheval", voices:$v, dropped:$d, models_ran:$m}}')"
+nplanned=$(( survived + ndrop ))
+
+# Panel-health floor — the council's core guarantee (see header: "Distinct
+# families review the same diff so no single model's blind spot decides"). Each
+# voice slot is a distinct family by construction, so a verdict from FEWER than
+# 2 surviving voices is effectively SINGLE-PERSPECTIVE: the cross-model coverage
+# the council exists to provide is NOT met. A dropped voice must never silently
+# shrink the panel to one and still read as a "council" verdict — surface it
+# LOUDLY + in the JSON (consumers gate on panel.multi_perspective_met). This is
+# the immune response to a paid voice going dark unnoticed (e.g. a dead model
+# pin like fable→Fable-5-unavailable) instead of the panel quietly halving.
+multi_perspective_met=true
+if [[ "$survived" -lt 2 ]]; then
+  multi_perspective_met=false
+  err "⚠⚠ PANEL DEGRADED TO SINGLE-VOICE — only $survived of $nplanned voices survived; the cross-model (multi-family) guarantee is NOT met. Treat this verdict as single-perspective. Dropped: $(jq -c '[.[]|{voice,reason}]' <<<"$dropped_json")"
+elif [[ "$ndrop" -gt 0 ]]; then
+  err "⚠ panel degraded — $ndrop of $nplanned voices dropped (guarantee still met: $survived families survived). Dropped: $(jq -c '[.[]|{voice,reason}]' <<<"$dropped_json")"
+fi
+
+summary="cheval-routed · $survived/$nplanned voices survived, $ndrop dropped · multi_perspective=$multi_perspective_met · verdict $verdict"
+result="$(jq -nc --arg verdict "$verdict" --arg summary "$summary" --argjson v "$panel_voices_json" --argjson d "$dropped_json" --argjson m "$models_ran_json" --argjson vs "$survived" --argjson vp "$nplanned" --argjson mpm "$multi_perspective_met" \
+  '{verdict:$verdict, summary:$summary, panel:{routed_via:"cheval", voices:$v, dropped:$d, models_ran:$m, voices_survived:$vs, voices_planned:$vp, multi_perspective_met:$mpm}}')"
 [[ -n "$OUT" ]] && echo "$result" >"$OUT" || echo "$result"
 err "$summary"
 [[ "$verdict" == "APPROVED" ]] && exit 0 || exit 1
