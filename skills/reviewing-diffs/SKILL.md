@@ -17,6 +17,22 @@ The dispatcher is `scripts/fagan-review.sh`; mode is selected by `FAGAN_REVIEW_M
 audit (`.run/model-invoke.jsonl`) + a `panel:{voices,dropped,models_ran}` block;
 single-pass output conforms to `schemas/codex-review-finding.schema.json`.
 
+## The first question — task conformance before diff quality
+
+Before judging whether the diff is *good code*, judge whether it does *what was asked*. A review
+that grades only internal quality — naming, structure, edge cases — will APPROVE wrong work: a diff
+that is clean, well-tested, and solves the wrong problem. The gate must carry the TASK (the
+requirement / acceptance criteria / the bug under fix) and verify conformance to it FIRST; internal
+diff quality is the second pass, not the first.
+
+- **Anti-pattern:** a review request that hands over only the diff. With no task in hand the council
+  can ask "is this well-made?" but never "is this the thing?", and a polished diff sails through.
+  (Origin: the craft-gate approved wrong work twice on exp2-acf-0610a because the gate prompt never
+  carried the task — rooms-substrate#28/#29/PR#32.)
+- **Do:** when a task or acceptance criterion exists, state it in the review request and make
+  conformance finding #1. A diff that is internally flawless but misses the requirement is
+  `CHANGES_REQUIRED`, not `APPROVED`.
+
 ## Inputs
 
 | Input | Required | Description |
